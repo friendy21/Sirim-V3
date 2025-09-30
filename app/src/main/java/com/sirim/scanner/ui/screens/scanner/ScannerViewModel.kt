@@ -251,7 +251,6 @@ class ScannerViewModel private constructor(
         }
     }
 }
-
 data class ScanStatus(
     val state: ScanState = ScanState.Idle,
     val message: String = "",
@@ -300,3 +299,4 @@ private data class PendingRecord(
         isVerified = false
     )
 }
+

@@ -35,6 +35,7 @@ import com.sirim.scanner.data.export.ExportFormat
 import com.sirim.scanner.ui.common.DateRangeFilter
 import com.sirim.scanner.ui.common.VerifiedFilter
 
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ExportScreen(
@@ -46,6 +47,7 @@ fun ExportScreen(
     val lastExportUri by viewModel.lastExportUri.collectAsState()
     val lastFormat by viewModel.lastFormat.collectAsState()
     val uiState by viewModel.uiState.collectAsState()
+
     val shareLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { }

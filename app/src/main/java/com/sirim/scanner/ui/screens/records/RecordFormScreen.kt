@@ -62,6 +62,7 @@ fun RecordFormScreen(
     val activeRecord by viewModel.activeRecord.collectAsState()
     val formError by viewModel.formError.collectAsState()
 
+
     LaunchedEffect(activeRecord?.id) {
         activeRecord?.let { record ->
             serialState.value = TextFieldValue(record.sirimSerialNo)

@@ -9,6 +9,7 @@ import com.itextpdf.layout.element.Cell
 import com.itextpdf.layout.element.Paragraph
 import com.itextpdf.layout.element.Table
 import com.sirim.scanner.data.export.ExportFormat
+
 import com.sirim.scanner.data.db.SirimRecord
 import java.io.File
 import java.io.FileOutputStream
@@ -154,7 +155,7 @@ class ExportManager(private val context: Context) {
                 row.createCell(columnIndex).setCellValue(value)
             }
         }
-        sheet.setAutoFilter(CellRangeAddress(0, records.size, 0, headers.lastIndex))
+        sheet.setAutoFilter(CellRangeAddress(0, records.size, 0, headers.lastIndex)) 
     }
 
     private fun createBrandSheet(sheet: org.apache.poi.ss.usermodel.Sheet, records: List<SirimRecord>) {

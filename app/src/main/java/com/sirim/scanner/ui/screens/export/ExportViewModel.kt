@@ -52,7 +52,6 @@ class ExportViewModel private constructor(
             availableBrands = availableBrands
         )
     }.stateIn(viewModelScope, SharingStarted.Lazily, ExportUiState())
-
     private val _lastExportUri = MutableStateFlow<Uri?>(null)
     val lastExportUri: StateFlow<Uri?> = _lastExportUri.asStateFlow()
 
@@ -105,7 +104,6 @@ class ExportViewModel private constructor(
         }
     }
 }
-
 data class ExportUiState(
     val filteredRecords: List<SirimRecord> = emptyList(),
     val totalRecords: Int = 0,

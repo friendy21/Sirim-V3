@@ -354,6 +354,7 @@ private fun CameraPreview(
     lifecycleOwner: LifecycleOwner,
     viewModel: ScannerViewModel,
     status: ScanStatus
+
 ) {
     val context = LocalContext.current
     val cameraProviderFuture = remember { ProcessCameraProvider.getInstance(context) }

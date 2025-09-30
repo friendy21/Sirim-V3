@@ -132,7 +132,6 @@ class RecordViewModel private constructor(
     fun clearFormError() {
         _formError.value = null
     }
-
     companion object {
         fun Factory(repository: SirimRepository): ViewModelProvider.Factory =
             object : ViewModelProvider.Factory {

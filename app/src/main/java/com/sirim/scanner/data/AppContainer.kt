@@ -6,6 +6,7 @@ import com.sirim.scanner.data.db.SirimDatabase
 import com.sirim.scanner.data.export.ExportManager
 import com.sirim.scanner.data.ocr.LabelAnalyzer
 import com.sirim.scanner.data.ocr.TesseractManager
+
 import com.sirim.scanner.data.repository.SirimRepository
 import com.sirim.scanner.data.repository.SirimRepositoryImpl
 import kotlinx.coroutines.CoroutineScope

@@ -37,6 +37,7 @@ import com.sirim.scanner.data.db.SirimRecord
 import com.sirim.scanner.ui.common.DateRangeFilter
 import com.sirim.scanner.ui.common.VerifiedFilter
 
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun RecordListScreen(
@@ -196,6 +197,7 @@ private fun RecordListItem(
                 .fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
+
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(text = record.sirimSerialNo, style = MaterialTheme.typography.titleMedium)
                 Text(text = record.brandTrademark, style = MaterialTheme.typography.bodyMedium)

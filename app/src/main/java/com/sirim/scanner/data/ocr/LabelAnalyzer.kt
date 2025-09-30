@@ -2,6 +2,7 @@ package com.sirim.scanner.data.ocr
 
 import android.graphics.Bitmap
 import android.graphics.Rect
+import android.graphics.Matrix
 import androidx.camera.core.ImageProxy
 import com.google.mlkit.vision.barcode.Barcode
 import com.google.mlkit.vision.barcode.BarcodeScannerOptions

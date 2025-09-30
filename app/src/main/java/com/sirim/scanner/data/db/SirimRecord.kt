@@ -14,6 +14,7 @@ import androidx.room.PrimaryKey
         Index(value = ["is_verified"])
     ]
 )
+
 data class SirimRecord(
     @PrimaryKey(autoGenerate = true)
     val id: Long = 0,
