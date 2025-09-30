@@ -2,9 +2,19 @@ package com.sirim.scanner.data.db
 
 import androidx.room.ColumnInfo
 import androidx.room.Entity
+import androidx.room.Index
 import androidx.room.PrimaryKey
 
-@Entity(tableName = "sirim_records")
+@Entity(
+    tableName = "sirim_records",
+    indices = [
+        Index(value = ["sirim_serial_no"], unique = true),
+        Index(value = ["created_at"]),
+        Index(value = ["brand_trademark"]),
+        Index(value = ["is_verified"])
+    ]
+)
+
 data class SirimRecord(
     @PrimaryKey(autoGenerate = true)
     val id: Long = 0,

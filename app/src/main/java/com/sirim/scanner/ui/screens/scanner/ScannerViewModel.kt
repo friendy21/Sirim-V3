@@ -15,8 +15,12 @@ import com.sirim.scanner.data.validation.ValidationResult
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 class ScannerViewModel private constructor(
@@ -41,6 +45,78 @@ class ScannerViewModel private constructor(
 
     private val _lastResultId = MutableStateFlow<Long?>(null)
     val lastResultId: StateFlow<Long?> = _lastResultId.asStateFlow()
+
+    private val _batchMode = MutableStateFlow(false)
+    private val _batchQueue = MutableStateFlow<List<PendingRecord>>(emptyList())
+
+    val batchUiState: StateFlow<BatchUiState> = combine(_batchMode, _batchQueue) { enabled, queue ->
+        BatchUiState(
+            enabled = enabled,
+            queued = queue.map { BatchQueueItem(it.serial, it.timestamp, it.captureConfidence) }
+        )
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, BatchUiState())
+
+    fun setBatchMode(enabled: Boolean) {
+        if (_batchMode.value == enabled) return
+        _batchMode.value = enabled
+        _status.value = _status.value.copy(
+            state = if (enabled) ScanState.Ready else ScanState.Idle,
+            message = if (enabled) "Batch mode enabled" else "Batch mode disabled"
+        )
+    }
+
+    fun clearBatchQueue() {
+        if (_batchQueue.value.isEmpty()) return
+        _batchQueue.value = emptyList()
+        _status.value = _status.value.copy(state = ScanState.Idle, message = "Batch queue cleared")
+    }
+
+    fun saveBatch() {
+        val queued = _batchQueue.value
+        if (queued.isEmpty()) {
+            _status.value = _status.value.copy(message = "Batch queue is empty")
+            return
+        }
+        appScope.launch {
+            val savedIds = mutableListOf<Long>()
+            val skippedSerials = mutableListOf<String>()
+            var totalConfidence = 0f
+            queued.forEach { pending ->
+                val duplicate = repository.findBySerial(pending.serial)
+                if (duplicate != null) {
+                    skippedSerials += pending.serial
+                    return@forEach
+                }
+                val imagePath = pending.imageBytes?.let { repository.persistImage(it) }
+                val record = pending.toRecord(imagePath)
+                val id = repository.upsert(record)
+                savedIds += id
+                totalConfidence += pending.captureConfidence
+            }
+            _batchQueue.value = emptyList()
+            _batchMode.value = false
+            if (savedIds.isNotEmpty()) {
+                _lastResultId.value = savedIds.last()
+            }
+            val message = when {
+                savedIds.isNotEmpty() && skippedSerials.isNotEmpty() ->
+                    "${savedIds.size} saved, ${skippedSerials.size} duplicates skipped"
+                savedIds.isNotEmpty() -> "Batch saved (${savedIds.size} records)"
+                skippedSerials.isNotEmpty() -> "Skipped duplicates: ${skippedSerials.joinToString()}"
+                else -> "No records saved"
+            }
+            val averageConfidence = if (savedIds.isNotEmpty()) {
+                (totalConfidence / savedIds.size).coerceIn(0f, 1f)
+            } else {
+                _status.value.confidence
+            }
+            _status.value = _status.value.copy(
+                state = if (skippedSerials.isEmpty()) ScanState.Persisted else ScanState.Duplicate,
+                message = message,
+                confidence = averageConfidence
+            )
+        }
+    }
 
     fun analyzeImage(imageProxy: ImageProxy) {
         if (!processing.compareAndSet(false, true)) {
@@ -118,36 +194,49 @@ class ScannerViewModel private constructor(
     }
 
     private fun persistIfUnique(validation: ValidationResult, result: OcrResult.Success) {
-        val serial = validation.sanitized["sirimSerialNo"]?.value
-        if (serial.isNullOrBlank()) {
+        val serialConfidence = validation.sanitized["sirimSerialNo"]
+        if (serialConfidence == null || serialConfidence.value.isBlank()) {
             _status.value = _status.value.copy(state = ScanState.Error, message = "Serial number missing; manual review required")
             return
         }
+        val sanitizedCopy = validation.sanitized.mapValues { it.value.copy() }
+        val pending = PendingRecord(
+            serial = serialConfidence.value,
+            fields = sanitizedCopy,
+            imageBytes = result.bitmap?.toJpegByteArray(),
+            timestamp = System.currentTimeMillis(),
+            captureConfidence = result.confidence
+        )
         appScope.launch {
-            val duplicate = repository.findBySerial(serial)
+            val duplicate = repository.findBySerial(pending.serial)
             if (duplicate != null) {
-                _status.value = _status.value.copy(state = ScanState.Duplicate, message = "Duplicate serial detected: $serial")
+                _status.value = _status.value.copy(state = ScanState.Duplicate, message = "Duplicate serial detected: ${pending.serial}")
                 return@launch
             }
-            val imagePath = result.bitmap?.toJpegByteArray()?.let { bytes ->
-                repository.persistImage(bytes)
+            if (_batchMode.value) {
+                _batchQueue.update { it + pending }
+                val queueSize = _batchQueue.value.size
+                _status.value = _status.value.copy(
+                    state = ScanState.Ready,
+                    message = "Queued ${pending.serial} ($queueSize pending)",
+                    confidence = pending.captureConfidence
+                )
+            } else {
+                persistPending(pending)
             }
-            val sanitizedValues = validation.sanitized
-            val record = SirimRecord(
-                sirimSerialNo = sanitizedValues["sirimSerialNo"]?.value.orEmpty(),
-                batchNo = sanitizedValues["batchNo"]?.value.orEmpty(),
-                brandTrademark = sanitizedValues["brandTrademark"]?.value.orEmpty(),
-                model = sanitizedValues["model"]?.value.orEmpty(),
-                type = sanitizedValues["type"]?.value.orEmpty(),
-                rating = sanitizedValues["rating"]?.value.orEmpty(),
-                size = sanitizedValues["size"]?.value.orEmpty(),
-                imagePath = imagePath,
-                isVerified = false
-            )
-            val id = repository.upsert(record)
-            _lastResultId.value = id
-            _status.value = _status.value.copy(state = ScanState.Persisted, message = "Record saved", confidence = result.confidence)
         }
+    }
+
+    private suspend fun persistPending(pending: PendingRecord) {
+        val imagePath = pending.imageBytes?.let { repository.persistImage(it) }
+        val record = pending.toRecord(imagePath)
+        val id = repository.upsert(record)
+        _lastResultId.value = id
+        _status.value = _status.value.copy(
+            state = ScanState.Persisted,
+            message = "Record saved (${pending.serial})",
+            confidence = pending.captureConfidence
+        )
     }
 
     companion object {
@@ -178,3 +267,36 @@ enum class ScanState {
     Duplicate,
     Error
 }
+
+data class BatchUiState(
+    val enabled: Boolean = false,
+    val queued: List<BatchQueueItem> = emptyList()
+)
+
+data class BatchQueueItem(
+    val serial: String,
+    val capturedAt: Long,
+    val confidence: Float
+)
+
+private data class PendingRecord(
+    val serial: String,
+    val fields: Map<String, FieldConfidence>,
+    val imageBytes: ByteArray?,
+    val timestamp: Long,
+    val captureConfidence: Float
+) {
+    fun toRecord(imagePath: String?): SirimRecord = SirimRecord(
+        sirimSerialNo = fields["sirimSerialNo"]?.value.orEmpty(),
+        batchNo = fields["batchNo"]?.value.orEmpty(),
+        brandTrademark = fields["brandTrademark"]?.value.orEmpty(),
+        model = fields["model"]?.value.orEmpty(),
+        type = fields["type"]?.value.orEmpty(),
+        rating = fields["rating"]?.value.orEmpty(),
+        size = fields["size"]?.value.orEmpty(),
+        imagePath = imagePath,
+        createdAt = timestamp,
+        isVerified = false
+    )
+}
+

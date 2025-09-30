@@ -18,6 +18,9 @@ The repository now contains a full Android Studio project that implements the MV
 3. Connect an Android 13+ device or start an emulator.
 4. Use **Run ▶ Run 'app'** to install and launch the application. Log in with `admin / admin`.
 
+### OCR Fallback Setup
+- The ML Kit recogniser handles most captures, but the app also ships with a Tesseract fallback. Place the English trained data file at `app/src/main/assets/tessdata/eng.traineddata` (or push it to the device's `/files/tesseract/tessdata` directory) to enable the fallback path. Without this file the app will gracefully fall back to ML Kit only.
+
 ### Testing Notes
 - Unit/UI tests are scaffolded via the default Gradle tasks (`./gradlew test`, `./gradlew connectedAndroidTest`). They currently serve as placeholders until bespoke tests are implemented for the MVP.
 - OCR and camera functionality should be validated on physical hardware for accurate results.
@@ -94,7 +97,15 @@ Data Entry     Export Options
 
 ## Database Schema (Room)
 ```kotlin
-@Entity(tableName = "sirim_records")
+@Entity(
+    tableName = "sirim_records",
+    indices = [
+        Index(value = ["sirim_serial_no"], unique = true),
+        Index(value = ["created_at"]),
+        Index(value = ["brand_trademark"]),
+        Index(value = ["is_verified"])
+    ]
+)
 data class SirimRecord(
     @PrimaryKey(autoGenerate = true)
     val id: Long = 0,
@@ -113,20 +124,31 @@ data class SirimRecord(
     @ColumnInfo(name = "size")
     val size: String,
     @ColumnInfo(name = "image_path")
-    val imagePath: String,
+    val imagePath: String?,
     @ColumnInfo(name = "created_at")
     val createdAt: Long = System.currentTimeMillis(),
     @ColumnInfo(name = "is_verified")
-    val isVerified: Boolean = false
+    val isVerified: Boolean = false,
+    @ColumnInfo(name = "needs_sync")
+    val needsSync: Boolean = true,
+    @ColumnInfo(name = "server_id")
+    val serverId: String? = null,
+    @ColumnInfo(name = "last_synced")
+    val lastSynced: Long? = null
 )
 ```
 
 ## Key Feature Implementation Notes
 ### Enhanced Camera & OCR
 - Auto-adjust lighting, focus, and exposure using CameraX.
-- Real-time analysis using ML Kit; fallback to Tesseract upon failure.
-- Image preprocessing via OpenCV for denoising and contrast improvements.
+- Real-time analysis using ML Kit with an automatic Tesseract fallback (requires the `eng.traineddata` model described above).
+- Image preprocessing via OpenCV for denoising, thresholding, and perspective cleanup.
 - Manual tap-to-capture option when auto detection is insufficient.
+
+### Batch Scanning
+- Toggle batch mode inside the scanner to queue multiple captures without leaving the camera view.
+- Review queued serials with per-item confidence summaries before committing.
+- Save or clear the queue in bulk; duplicates are automatically skipped during batch persistence.
 
 ### Smart Data Extraction
 - Pattern recognition for SIRIM labels.
@@ -134,12 +156,13 @@ data class SirimRecord(
 - Manual overrides for user corrections.
 
 ### Data Management
-- Compose-based table view with search, filter, edit, and delete capabilities.
+- Compose-based table view with free-text search, brand/date/verification filters, edit, and delete capabilities.
 - Stored images linked to records for reference.
 
 ### Export Functionality
-- Export selected or all records to PDF, Excel, and CSV.
-- Generated files ready for email attachment or sharing via ShareSheet.
+- Export filtered record sets (brand, verification state, date range) to PDF, Excel, and CSV.
+- Excel exports include multi-sheet output (summary, full data, grouped by brand).
+- Generated files are stored under `Android/data/.../SIRIM_Exports/<yyyyMMdd>/` with timestamped filenames and can be shared via the ShareSheet.
 
 ## Development Phases
 1. **Week 1 – Core Setup:** Project scaffolding, basic UI, Room integration, navigation.

@@ -8,9 +8,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material3.Button
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -47,6 +48,7 @@ fun RecordFormScreen(
             viewModel.loadRecord(id)
         } ?: run {
             viewModel.resetActiveRecord()
+            viewModel.clearFormError()
             serialState.value = TextFieldValue("")
             batchState.value = TextFieldValue("")
             brandState.value = TextFieldValue("")
@@ -58,6 +60,8 @@ fun RecordFormScreen(
     }
 
     val activeRecord by viewModel.activeRecord.collectAsState()
+    val formError by viewModel.formError.collectAsState()
+
 
     LaunchedEffect(activeRecord?.id) {
         activeRecord?.let { record ->
@@ -68,6 +72,7 @@ fun RecordFormScreen(
             typeState.value = TextFieldValue(record.type)
             ratingState.value = TextFieldValue(record.rating)
             sizeState.value = TextFieldValue(record.size)
+            viewModel.clearFormError()
         }
     }
 
@@ -92,8 +97,17 @@ fun RecordFormScreen(
         ) {
             OutlinedTextField(
                 value = serialState.value,
-                onValueChange = { serialState.value = it },
+                onValueChange = {
+                    serialState.value = it
+                    viewModel.clearFormError()
+                },
                 label = { Text("SIRIM Serial No.") },
+                isError = formError != null,
+                supportingText = {
+                    formError?.let { message ->
+                        Text(text = message, color = MaterialTheme.colorScheme.error)
+                    }
+                },
                 modifier = Modifier.fillMaxWidth()
             )
             OutlinedTextField(

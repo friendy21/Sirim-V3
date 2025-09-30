@@ -22,6 +22,7 @@ import kotlin.math.min
 import kotlinx.coroutines.tasks.await
 
 class LabelAnalyzer(
+    private val tesseractManager: TesseractManager,
     private val frameWindow: Int = 8,
     private val successThreshold: Float = 0.75f
 ) {
@@ -39,17 +40,20 @@ class LabelAnalyzer(
         val preprocessed = ImagePreprocessor.preprocess(imageProxy) ?: return OcrResult.Empty
 
         val textSegments = mutableListOf<String>()
-        val mainText = recognizer.safeProcess(InputImage.fromBitmap(preprocessed.enhanced, 0))
-        mainText?.text?.takeIf { it.isNotBlank() }?.let(textSegments::add)
+        recognizeText(preprocessed.enhanced)?.let(textSegments::add)
 
         val rotatedVariants = listOf(90f, -90f)
         rotatedVariants.forEach { angle ->
-            preprocessed.enhanced.rotate(angle)?.let { rotated ->
-                recognizer.safeProcess(InputImage.fromBitmap(rotated, 0))
-                    ?.text
-                    ?.takeIf { it.isNotBlank() }
-                    ?.let(textSegments::add)
-                rotated.recycle()
+            var rotated: Bitmap? = null
+            try {
+                rotated = preprocessed.enhanced.rotate(angle)
+                if (rotated != null) {
+                    recognizeText(rotated)?.let(textSegments::add)
+                }
+            } finally {
+                if (rotated != null && rotated !== preprocessed.enhanced && !rotated.isRecycled) {
+                    rotated.recycle()
+                }
             }
         }
 
@@ -153,8 +157,27 @@ class LabelAnalyzer(
     private fun Map<String, FieldConfidence>.averageConfidence(): Float =
         if (isEmpty()) 0f else values.map(FieldConfidence::confidence).average().toFloat()
 
-    private suspend fun com.google.mlkit.vision.text.TextRecognizer.safeProcess(image: InputImage) =
-        runCatching { process(image).await() }.getOrNull()
+    private suspend fun recognizeText(bitmap: Bitmap): String? {
+        val mlResult = runCatching {
+            recognizer.process(InputImage.fromBitmap(bitmap, 0)).await()
+        }.getOrNull()?.text?.takeIf { it.isNotBlank() }
+
+        if (!mlResult.isNullOrBlank()) {
+            return mlResult
+        }
+
+        var converted: Bitmap? = null
+        return try {
+            val source = if (bitmap.config == Bitmap.Config.ARGB_8888) {
+                bitmap
+            } else {
+                bitmap.copy(Bitmap.Config.ARGB_8888, false).also { converted = it }
+            }
+            tesseractManager.recognise(source)
+        } finally {
+            converted?.recycle()
+        }
+    }
 
     private suspend fun com.google.mlkit.vision.barcode.BarcodeScanner.safeProcess(image: InputImage) =
         runCatching { process(image).await() }.getOrNull().orEmpty()

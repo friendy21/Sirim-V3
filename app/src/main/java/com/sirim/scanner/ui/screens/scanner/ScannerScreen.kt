@@ -29,6 +29,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -36,6 +38,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Bolt
 import androidx.compose.material.icons.rounded.FlashOff
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.AssistChip
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -45,9 +49,9 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -89,6 +93,7 @@ fun ScannerScreen(
     val warnings by viewModel.validationWarnings.collectAsState()
     val errors by viewModel.validationErrors.collectAsState()
     val lastRecordId by viewModel.lastResultId.collectAsState()
+    val batchUiState by viewModel.batchUiState.collectAsState()
     val hasCameraPermission by remember {
         mutableStateOf(
             ContextCompat.checkSelfPermission(
@@ -127,6 +132,12 @@ fun ScannerScreen(
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             StatusCard(status = status)
+            BatchControls(
+                uiState = batchUiState,
+                onToggle = viewModel::setBatchMode,
+                onSave = viewModel::saveBatch,
+                onClear = viewModel::clearBatchQueue
+            )
             if (hasCameraPermission) {
                 CameraPreview(
                     modifier = Modifier
@@ -159,6 +170,55 @@ fun ScannerScreen(
                 }
             }
         )
+    }
+}
+
+@Composable
+private fun BatchControls(
+    uiState: BatchUiState,
+    onToggle: (Boolean) -> Unit,
+    onSave: () -> Unit,
+    onClear: () -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+    ) {
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
+                Column {
+                    Text("Batch mode", style = MaterialTheme.typography.titleSmall)
+                    Text("Queued ${uiState.queued.size}", style = MaterialTheme.typography.bodySmall)
+                }
+                Switch(checked = uiState.enabled, onCheckedChange = onToggle)
+            }
+
+            if (uiState.queued.isNotEmpty()) {
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    items(uiState.queued, key = { it.serial + it.capturedAt }) { item ->
+                        AssistChip(
+                            onClick = {},
+                            label = {
+                                Text("${item.serial} • ${(item.confidence * 100).roundToInt()}%")
+                            }
+                        )
+                    }
+                }
+            }
+
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
+                Button(
+                    onClick = onSave,
+                    enabled = uiState.enabled && uiState.queued.isNotEmpty(),
+                    modifier = Modifier.weight(1f)
+                ) { Text("Save Batch") }
+                TextButton(
+                    onClick = onClear,
+                    enabled = uiState.queued.isNotEmpty(),
+                    modifier = Modifier.weight(1f)
+                ) { Text("Clear Queue") }
+            }
+        }
     }
 }
 

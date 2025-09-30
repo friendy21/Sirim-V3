@@ -5,6 +5,8 @@ import androidx.room.Room
 import com.sirim.scanner.data.db.SirimDatabase
 import com.sirim.scanner.data.export.ExportManager
 import com.sirim.scanner.data.ocr.LabelAnalyzer
+import com.sirim.scanner.data.ocr.TesseractManager
+
 import com.sirim.scanner.data.repository.SirimRepository
 import com.sirim.scanner.data.repository.SirimRepositoryImpl
 import kotlinx.coroutines.CoroutineScope
@@ -38,7 +40,11 @@ class DefaultAppContainer(private val context: Context) : AppContainer {
         ExportManager(context.applicationContext)
     }
 
-    override val labelAnalyzer: LabelAnalyzer by lazy { LabelAnalyzer() }
+    private val tesseractManager: TesseractManager by lazy {
+        TesseractManager(context.applicationContext)
+    }
+
+    override val labelAnalyzer: LabelAnalyzer by lazy { LabelAnalyzer(tesseractManager) }
 
     override val applicationScope: CoroutineScope
         get() = applicationScopeImpl

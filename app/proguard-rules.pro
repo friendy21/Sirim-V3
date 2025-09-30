@@ -1,3 +1,11 @@
 # Keep ML Kit models and CameraX metadata
 -keep class com.google.mlkit.** { *; }
 -keep class androidx.camera.** { *; }
+-keep class * extends androidx.room.RoomDatabase
+-keep @androidx.room.Entity class *
+-dontwarn androidx.room.paging.**
+-keep class org.opencv.** { *; }
+-dontwarn org.apache.poi.**
+-dontwarn org.apache.xmlbeans.**
+-keep class com.itextpdf.** { *; }
+-keep class com.googlecode.tesseract.** { *; }

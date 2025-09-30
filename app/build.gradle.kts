@@ -65,7 +65,6 @@ dependencies {
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.compose.material3:material3:1.2.1")
     implementation("androidx.compose.material:material-icons-extended")
-
     implementation("androidx.navigation:navigation-compose:2.7.7")
 
     implementation("androidx.room:room-runtime:2.6.1")
@@ -84,7 +83,7 @@ dependencies {
     implementation("com.journeyapps:zxing-android-embedded:4.3.0")
 
     implementation("org.opencv:opencv:4.9.0")
-    implementation("org.bytedeco:tesseract-platform:5.3.3-1.5.10")
+    implementation("com.googlecode.tesseract.android:tess-two:9.1.0")
 
     implementation("com.itextpdf:itext7-core:8.0.1")
     implementation("org.apache.poi:poi-ooxml:5.2.5")
