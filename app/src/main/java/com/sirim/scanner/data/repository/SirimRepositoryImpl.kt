@@ -31,7 +31,7 @@ class SirimRepositoryImpl(
     }
 
     override suspend fun getRecord(id: Long): SirimRecord? = dao.getRecordById(id)
-
+    override suspend fun findBySerial(serial: String): SirimRecord? = dao.findBySerial(serial)
     override suspend fun persistImage(bytes: ByteArray, extension: String): String {
         val directory = File(context.filesDir, "captured")
         if (!directory.exists()) directory.mkdirs()

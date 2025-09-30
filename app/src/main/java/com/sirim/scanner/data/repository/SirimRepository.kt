@@ -9,5 +9,6 @@ interface SirimRepository {
     suspend fun upsert(record: SirimRecord): Long
     suspend fun delete(record: SirimRecord)
     suspend fun getRecord(id: Long): SirimRecord?
+    suspend fun findBySerial(serial: String): SirimRecord?
     suspend fun persistImage(bytes: ByteArray, extension: String = "jpg"): String
 }

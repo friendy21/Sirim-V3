@@ -16,6 +16,9 @@ interface SirimRecordDao {
     @Query("SELECT * FROM sirim_records WHERE id = :id")
     suspend fun getRecordById(id: Long): SirimRecord?
 
+    @Query("SELECT * FROM sirim_records WHERE sirim_serial_no = :serial LIMIT 1")
+    suspend fun findBySerial(serial: String): SirimRecord?
+
     @Query(
         "SELECT * FROM sirim_records WHERE sirim_serial_no LIKE :query OR batch_no LIKE :query OR brand_trademark LIKE :query OR model LIKE :query ORDER BY created_at DESC"
     )
