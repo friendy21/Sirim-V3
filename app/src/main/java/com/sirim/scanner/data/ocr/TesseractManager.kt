@@ -2,7 +2,7 @@ package com.sirim.scanner.data.ocr
 
 import android.content.Context
 import android.graphics.Bitmap
-import com.googlecode.tesseract.android.TessBaseAPI
+import cz.adaptech.tesseract4android.TessBaseAPI
 import java.io.File
 import java.io.FileOutputStream
 import kotlinx.coroutines.sync.Mutex
@@ -44,7 +44,9 @@ class TesseractManager(context: Context) {
         }.getOrDefault(false)
 
         if (success) {
-            engine.pageSegMode = TessBaseAPI.PageSegMode.PSM_AUTO
+            engine.pageSegMode = TessBaseAPI.PageSegMode.PSM_AUTO_OSD
+            engine.setVariable("tessedit_char_whitelist", "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-/. ")
+            engine.setVariable("textord_heavy_nr", "1")
             tessBaseApi = engine
         } else {
             engine.end()
