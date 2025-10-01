@@ -44,7 +44,9 @@ fun RecordListScreen(
     viewModel: RecordViewModel,
     onAdd: () -> Unit,
     onEdit: (SirimRecord) -> Unit,
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    isAuthenticated: Boolean,
+    onRequireAuthentication: (() -> Unit) -> Unit
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val records = uiState.records
@@ -52,7 +54,7 @@ fun RecordListScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Records") },
+                title = { Text("Storage") },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.Default.ArrowBack, contentDescription = "Back")
@@ -69,9 +71,19 @@ fun RecordListScreen(
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             Button(
-                onClick = onAdd,
+                onClick = {
+                    if (isAuthenticated) onAdd() else onRequireAuthentication(onAdd)
+                },
                 modifier = Modifier.fillMaxWidth()
             ) { Text("Add Record") }
+
+            if (!isAuthenticated) {
+                Text(
+                    text = "Admin login is required to add, edit, or delete records.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
 
             OutlinedTextField(
                 value = uiState.query,
@@ -106,11 +118,24 @@ fun RecordListScreen(
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     items(records, key = { it.id }) { record ->
-                        RecordListItem(
-                            record = record,
-                            onEdit = { onEdit(record) },
-                            onDelete = { viewModel.delete(record) }
-                        )
+                            RecordListItem(
+                                record = record,
+                                onEdit = {
+                                    if (isAuthenticated) {
+                                        onEdit(record)
+                                    } else {
+                                        onRequireAuthentication { onEdit(record) }
+                                    }
+                                },
+                                onDelete = {
+                                    if (isAuthenticated) {
+                                        viewModel.delete(record)
+                                    } else {
+                                        onRequireAuthentication { viewModel.delete(record) }
+                                    }
+                                },
+                                isAuthenticated = isAuthenticated
+                            )
                     }
                 }
             }
@@ -184,7 +209,8 @@ private fun FilterSection(
 private fun RecordListItem(
     record: SirimRecord,
     onEdit: () -> Unit,
-    onDelete: () -> Unit
+    onDelete: () -> Unit,
+    isAuthenticated: Boolean
 ) {
     Card(
         modifier = Modifier
@@ -204,7 +230,15 @@ private fun RecordListItem(
                 Text(text = record.model, style = MaterialTheme.typography.bodySmall)
             }
             IconButton(onClick = onDelete) {
-                Icon(Icons.Default.Delete, contentDescription = "Delete")
+                Icon(
+                    Icons.Default.Delete,
+                    contentDescription = "Delete",
+                    tint = if (isAuthenticated) {
+                        MaterialTheme.colorScheme.error
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    }
+                )
             }
         }
     }
