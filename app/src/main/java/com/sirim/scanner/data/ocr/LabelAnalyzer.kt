@@ -2,7 +2,7 @@ package com.sirim.scanner.data.ocr
 
 import android.graphics.Bitmap
 import android.graphics.Rect
-import android.graphics.Matrix
+import android.os.SystemClock
 import androidx.camera.core.ImageProxy
 import com.google.mlkit.vision.barcode.common.Barcode
 import com.google.mlkit.vision.barcode.BarcodeScannerOptions
@@ -17,14 +17,16 @@ import com.google.zxing.common.HybridBinarizer
 import com.google.zxing.RGBLuminanceSource
 import java.nio.ByteBuffer
 import java.util.ArrayDeque
+import kotlin.io.use
 import kotlin.math.max
 import kotlin.math.min
 import kotlinx.coroutines.tasks.await
 
 class LabelAnalyzer(
     private val tesseractManager: TesseractManager,
-    private val frameWindow: Int = 8,
-    private val successThreshold: Float = 0.75f
+    private val frameWindow: Int = 5,
+    private val successThreshold: Float = 0.75f,
+    private val frameIntervalMillis: Long = 150L
 ) {
 
     private val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
@@ -35,79 +37,112 @@ class LabelAnalyzer(
     )
     private val multiFormatReader = MultiFormatReader()
     private val recentFrames = ArrayDeque<FrameObservation>()
+    private var lastAnalysisTimestamp = 0L
 
     suspend fun analyze(imageProxy: ImageProxy): OcrResult {
-        val preprocessed = ImagePreprocessor.preprocess(imageProxy) ?: return OcrResult.Empty
+        if (!shouldProcessFrame()) {
+            return OcrResult.Skipped
+        }
 
-        val textSegments = mutableListOf<String>()
-        recognizeText(preprocessed.enhanced)?.let(textSegments::add)
+        val preprocessed = ImagePreprocessor.preprocess(imageProxy)
+            ?: return OcrResult.Failure(OcrFailureReason.Preprocessing, "Image preprocessing failed")
 
-        val rotatedVariants = listOf(90f, -90f)
-        rotatedVariants.forEach { angle ->
-            var rotated: Bitmap? = null
-            try {
-                rotated = preprocessed.enhanced.rotate(angle)
-                if (rotated != null) {
-                    recognizeText(rotated)?.let(textSegments::add)
-                }
-            } finally {
-                if (rotated != null && rotated !== preprocessed.enhanced && !rotated.isRecycled) {
-                    rotated.recycle()
+        return preprocessed.use { processed ->
+            val textSegments = mutableListOf<String>()
+            var missingModelDetected = false
+
+            val primaryRecognition = recognizeText(processed.enhanced)
+            primaryRecognition.text?.let(textSegments::add)
+            missingModelDetected = missingModelDetected || primaryRecognition.missingModel
+
+            if (textSegments.isEmpty()) {
+                val rotatedVariants = listOf(90f, -90f)
+                for (angle in rotatedVariants) {
+                    var rotated: Bitmap? = null
+                    try {
+                        rotated = processed.enhanced.rotate(angle)
+                        if (rotated != null) {
+                            val rotatedResult = recognizeText(rotated)
+                            rotatedResult.text?.let(textSegments::add)
+                            missingModelDetected = missingModelDetected || rotatedResult.missingModel
+                            if (textSegments.isNotEmpty()) {
+                                break
+                            }
+                        }
+                    } finally {
+                        if (rotated != null && rotated !== processed.enhanced && !rotated.isRecycled) {
+                            rotated.recycle()
+                        }
+                    }
                 }
             }
-        }
 
-        val combinedText = textSegments.joinToString("\n") { it.trim() }
-        val parsedFields = if (combinedText.isNotBlank()) {
-            SirimLabelParser.parse(combinedText).toMutableMap()
-        } else {
-            mutableMapOf()
-        }
+            val combinedText = textSegments.joinToString("\n") { it.trim() }
+            val parsedFields = if (combinedText.isNotBlank()) {
+                SirimLabelParser.parse(combinedText).toMutableMap()
+            } else {
+                mutableMapOf()
+            }
 
-        val barcodeImage = InputImage.fromBitmap(preprocessed.original, 0)
-        val barcodeResults = barcodeScanner.safeProcess(barcodeImage)
-        val qrPayload = barcodeResults.firstOrNull()?.rawValue
-            ?: decodeWithZxing(preprocessed.original)
-            ?: preprocessed.regionOfInterest?.let { region ->
-                preprocessed.original.safeCrop(region)?.use { cropped ->
-                    decodeWithZxing(cropped)
+            val barcodeImage = InputImage.fromBitmap(processed.original, 0)
+            val barcodeResults = barcodeScanner.safeProcess(barcodeImage)
+            val qrPayload = barcodeResults.firstOrNull()?.rawValue
+                ?: decodeWithZxing(processed.original)
+                ?: processed.regionOfInterest?.let { region ->
+                    processed.original.safeCrop(region)?.use { cropped ->
+                        decodeWithZxing(cropped)
+                    }
+                }
+
+            val qrField = SirimLabelParser.mergeWithQr(parsedFields, qrPayload)
+            val observation = if (parsedFields.isEmpty()) {
+                null
+            } else {
+                FrameObservation(
+                    fields = parsedFields,
+                    qr = qrField,
+                    confidence = parsedFields.averageConfidence()
+                )
+            }
+            val consensus = observation?.let(::updateConsensus)
+
+            val aggregatedFields = consensus?.fields ?: parsedFields
+            val aggregatedConfidence = consensus?.confidence ?: observation?.confidence ?: 0f
+            val frames = consensus?.frames ?: observation?.let { recentFrames.size } ?: 0
+            val isStable = consensus?.isStable ?: (aggregatedConfidence >= successThreshold && frames >= 2)
+
+            if (aggregatedFields.isEmpty()) {
+                recentFrames.clear()
+                return@use if (missingModelDetected && !tesseractManager.isModelAvailable()) {
+                    OcrResult.Failure(
+                        reason = OcrFailureReason.MissingTesseractModel,
+                        detail = "Tesseract eng.traineddata model not available"
+                    )
+                } else {
+                    OcrResult.Empty
                 }
             }
 
-        val qrField = SirimLabelParser.mergeWithQr(parsedFields, qrPayload)
-        val observation = FrameObservation(
-            fields = parsedFields,
-            qr = qrField,
-            confidence = parsedFields.averageConfidence()
-        )
-        val consensus = updateConsensus(observation)
-
-        val aggregatedFields = consensus?.fields ?: parsedFields
-        val aggregatedConfidence = consensus?.confidence ?: observation.confidence
-        val frames = consensus?.frames ?: 1
-        val isStable = consensus?.isStable ?: (aggregatedConfidence >= successThreshold && frames >= 2)
-
-        if (aggregatedFields.isEmpty()) {
-            return OcrResult.Empty
-        }
-
-        val qrValue = consensus?.qr?.value ?: qrField?.value ?: qrPayload
-        return if (isStable) {
-            OcrResult.Success(
-                fields = aggregatedFields,
-                qrCode = qrValue,
-                bitmap = preprocessed.original,
-                confidence = aggregatedConfidence,
-                frames = frames
-            )
-        } else {
-            OcrResult.Partial(
-                fields = aggregatedFields,
-                qrCode = qrValue,
-                bitmap = preprocessed.original,
-                confidence = aggregatedConfidence,
-                frames = frames
-            )
+            val qrValue = consensus?.qr?.value ?: qrField?.value ?: qrPayload
+            val resultBitmap = processed.original.copy(Bitmap.Config.ARGB_8888, false)
+                ?: Bitmap.createBitmap(processed.original)
+            if (isStable) {
+                OcrResult.Success(
+                    fields = aggregatedFields,
+                    qrCode = qrValue,
+                    bitmap = resultBitmap,
+                    confidence = aggregatedConfidence,
+                    frames = frames
+                )
+            } else {
+                OcrResult.Partial(
+                    fields = aggregatedFields,
+                    qrCode = qrValue,
+                    bitmap = resultBitmap,
+                    confidence = aggregatedConfidence,
+                    frames = frames
+                )
+            }
         }
     }
 
@@ -157,17 +192,17 @@ class LabelAnalyzer(
     private fun Map<String, FieldConfidence>.averageConfidence(): Float =
         if (isEmpty()) 0f else values.map(FieldConfidence::confidence).average().toFloat()
 
-    private suspend fun recognizeText(bitmap: Bitmap): String? {
+    private suspend fun recognizeText(bitmap: Bitmap): RecognitionResult {
         val mlResult = runCatching {
             recognizer.process(InputImage.fromBitmap(bitmap, 0)).await()
         }.getOrNull()?.text?.takeIf { it.isNotBlank() }
 
         if (!mlResult.isNullOrBlank()) {
-            return mlResult
+            return RecognitionResult(text = mlResult, missingModel = false)
         }
 
         var converted: Bitmap? = null
-        return try {
+        val fallback = try {
             val source = if (bitmap.config == Bitmap.Config.ARGB_8888) {
                 bitmap
             } else {
@@ -177,6 +212,19 @@ class LabelAnalyzer(
         } finally {
             converted?.recycle()
         }
+
+        val sanitized = fallback?.takeIf { it.isNotBlank() }
+        val missingModel = !tesseractManager.isModelAvailable()
+        return RecognitionResult(text = sanitized, missingModel = missingModel)
+    }
+
+    private fun shouldProcessFrame(): Boolean {
+        val now = SystemClock.elapsedRealtime()
+        if (now - lastAnalysisTimestamp < frameIntervalMillis) {
+            return false
+        }
+        lastAnalysisTimestamp = now
+        return true
     }
 
     private suspend fun com.google.mlkit.vision.barcode.BarcodeScanner.safeProcess(image: InputImage) =
@@ -214,7 +262,19 @@ sealed interface OcrResult {
         val frames: Int
     ) : OcrResult
 
+    data class Failure(
+        val reason: OcrFailureReason,
+        val detail: String? = null
+    ) : OcrResult
+
     data object Empty : OcrResult
+
+    data object Skipped : OcrResult
+}
+
+enum class OcrFailureReason {
+    Preprocessing,
+    MissingTesseractModel
 }
 
 private data class FrameObservation(
@@ -229,6 +289,11 @@ private data class ConsensusResult(
     val isStable: Boolean,
     val frames: Int,
     val qr: FieldConfidence?
+)
+
+private data class RecognitionResult(
+    val text: String?,
+    val missingModel: Boolean
 )
 
 private fun ImageProxy.toBitmap(): Bitmap? {
