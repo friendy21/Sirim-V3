@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.room.Room
 import com.sirim.scanner.data.db.SirimDatabase
 import com.sirim.scanner.data.export.ExportManager
+import com.sirim.scanner.data.ocr.BarcodeAnalyzer
 import com.sirim.scanner.data.ocr.LabelAnalyzer
 import com.sirim.scanner.data.ocr.TesseractManager
 import com.sirim.scanner.data.preferences.PreferencesManager
@@ -17,6 +18,7 @@ interface AppContainer {
     val repository: SirimRepository
     val exportManager: ExportManager
     val labelAnalyzer: LabelAnalyzer
+    val barcodeAnalyzer: BarcodeAnalyzer
     val applicationScope: CoroutineScope
     val preferencesManager: PreferencesManager
 }
@@ -28,11 +30,12 @@ class DefaultAppContainer(private val context: Context) : AppContainer {
         context,
         SirimDatabase::class.java,
         "sirim_records.db"
-    ).fallbackToDestructiveMigration().build()
+    ).addMigrations(SirimDatabase.MIGRATION_1_2).build()
 
     override val repository: SirimRepository by lazy {
         SirimRepositoryImpl(
-            dao = database.sirimRecordDao(),
+            sirimDao = database.sirimRecordDao(),
+            skuDao = database.skuRecordDao(),
             context = context.applicationContext
         )
     }
@@ -46,6 +49,8 @@ class DefaultAppContainer(private val context: Context) : AppContainer {
     }
 
     override val labelAnalyzer: LabelAnalyzer by lazy { LabelAnalyzer(tesseractManager) }
+
+    override val barcodeAnalyzer: BarcodeAnalyzer by lazy { BarcodeAnalyzer() }
 
     override val applicationScope: CoroutineScope
         get() = applicationScopeImpl

@@ -144,7 +144,13 @@ private fun NavGraph(container: AppContainer, navController: NavHostController) 
             )
         }
         composable(Destinations.SkuScanner.route) {
-            SkuScannerScreen(onBack = { navController.popBackStack() })
+            SkuScannerScreen(
+                onBack = { navController.popBackStack() },
+                onRecordSaved = {},
+                repository = container.repository,
+                analyzer = container.barcodeAnalyzer,
+                appScope = container.applicationScope
+            )
         }
         composable(Destinations.Storage.route) {
             val viewModel: RecordViewModel = viewModel(
