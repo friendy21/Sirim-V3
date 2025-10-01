@@ -75,7 +75,6 @@ class LabelAnalyzer(
                         }
                     }
                 }
-            }
 
             val combinedText = textSegments.joinToString("\n") { it.trim() }
             val parsedFields = if (combinedText.isNotBlank()) {
