@@ -29,6 +29,10 @@ class LabelAnalyzer(
     private val frameIntervalMillis: Long = 150L
 ) {
 
+    private companion object {
+        private val ROTATION_ANGLES = floatArrayOf(90f, -90f)
+    }
+
     private val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
     private val barcodeScanner = BarcodeScanning.getClient(
         BarcodeScannerOptions.Builder()
@@ -56,8 +60,8 @@ class LabelAnalyzer(
             missingModelDetected = missingModelDetected || primaryRecognition.missingModel
 
             if (textSegments.isEmpty()) {
-                val rotatedVariants = listOf(90f, -90f)
-                for (angle in rotatedVariants) {
+                for (angle in ROTATION_ANGLES) {
+
                     var rotated: Bitmap? = null
                     try {
                         rotated = processed.enhanced.rotate(angle)
@@ -75,6 +79,13 @@ class LabelAnalyzer(
                         }
                     }
                 }
+
+            val combinedText = textSegments.joinToString("\n") { it.trim() }
+            val parsedFields = if (combinedText.isNotBlank()) {
+                SirimLabelParser.parse(combinedText).toMutableMap()
+            } else {
+                mutableMapOf()
+            }
 
             val combinedText = textSegments.joinToString("\n") { it.trim() }
             val parsedFields = if (combinedText.isNotBlank()) {

@@ -22,9 +22,9 @@ private val LightColors = lightColorScheme(
     secondary = BrandSecondary,
     surface = BrandSurface,
     background = BrandSurface,
-    onSurface = Color(0xFF1C1B1F),
-    onSurfaceVariant = Color(0xFF49454F),
-    onBackground = Color(0xFF1C1B1F)
+    onSurface = BrandOnSurface,
+    onSurfaceVariant = BrandOnSurfaceVariant,
+    onBackground = BrandOnBackground
 )
 
 @Composable
