@@ -117,7 +117,7 @@ fun ScannerScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Scanner") },
+                title = { Text("SIRIM Scanner") },
                 navigationIcon = {
                     TextButton(onClick = onBack) { Text("Back") }
                 }
