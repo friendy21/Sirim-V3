@@ -13,6 +13,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -25,9 +26,12 @@ class RecordViewModel private constructor(
         .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
 
     private val searchQuery = MutableStateFlow("")
+    private val debouncedQuery = searchQuery
+        .debounce(300)
+        .stateIn(viewModelScope, SharingStarted.Eagerly, "")
     private val filters = MutableStateFlow(RecordFilters())
 
-    val uiState: StateFlow<RecordListUiState> = combine(allRecords, searchQuery, filters) { records, query, filters ->
+    val uiState: StateFlow<RecordListUiState> = combine(allRecords, debouncedQuery, filters) { records, query, filters ->
         val normalizedQuery = query.trim()
         val availableBrands = records.mapNotNull { it.brandTrademark.takeIf(String::isNotBlank) }
             .distinct()
@@ -71,6 +75,9 @@ class RecordViewModel private constructor(
     private val _formError = MutableStateFlow<String?>(null)
     val formError: StateFlow<String?> = _formError.asStateFlow()
 
+    private val _isSaving = MutableStateFlow(false)
+    val isSaving: StateFlow<Boolean> = _isSaving.asStateFlow()
+
     fun loadRecord(id: Long) {
         viewModelScope.launch {
             _activeRecord.value = repository.getRecord(id)
@@ -90,16 +97,24 @@ class RecordViewModel private constructor(
                 _formError.value = "SIRIM serial number is required"
                 return@launch
             }
-            val existing = repository.findBySerial(normalizedSerial)
-            if (existing != null && existing.id != record.id) {
-                _formError.value = "Serial $normalizedSerial already exists"
+            if (_isSaving.value) {
                 return@launch
             }
-            val sanitized = record.copy(sirimSerialNo = normalizedSerial)
-            val id = repository.upsert(sanitized)
-            _activeRecord.value = repository.getRecord(id)
-            _formError.value = null
-            onSaved(id)
+            _isSaving.value = true
+            try {
+                val existing = repository.findBySerial(normalizedSerial)
+                if (existing != null && existing.id != record.id) {
+                    _formError.value = "Serial $normalizedSerial already exists"
+                    return@launch
+                }
+                val sanitized = record.copy(sirimSerialNo = normalizedSerial)
+                val id = repository.upsert(sanitized)
+                _activeRecord.value = repository.getRecord(id)
+                _formError.value = null
+                onSaved(id)
+            } finally {
+                _isSaving.value = false
+            }
         }
     }
 

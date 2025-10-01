@@ -19,7 +19,7 @@ The repository now contains a full Android Studio project that implements the MV
 4. Use **Run ▶ Run 'app'** to install and launch the application. Log in with `admin / admin`.
 
 ### OCR Fallback Setup
-- The ML Kit recogniser handles most captures, but the app also ships with a Tesseract fallback. Place the English trained data file at `app/src/main/assets/tessdata/eng.traineddata` (or push it to the device's `/files/tesseract/tessdata` directory) to enable the fallback path. Without this file the app will gracefully fall back to ML Kit only.
+- The ML Kit recogniser handles most captures, but the app also ships with a Tesseract fallback. Place the English trained data file at `app/src/main/assets/tessdata/eng.traineddata` (or push it to the device's `/files/tesseract/tessdata` directory) to enable the fallback path. Without this file the app now surfaces an explicit warning (“Tesseract model missing...”) and gracefully falls back to ML Kit only.
 
 ### Testing Notes
 - Unit/UI tests are scaffolded via the default Gradle tasks (`./gradlew test`, `./gradlew connectedAndroidTest`). They currently serve as placeholders until bespoke tests are implemented for the MVP.

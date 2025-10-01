@@ -5,12 +5,18 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -23,6 +29,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import com.sirim.scanner.data.db.SirimRecord
@@ -61,6 +68,7 @@ fun RecordFormScreen(
 
     val activeRecord by viewModel.activeRecord.collectAsState()
     val formError by viewModel.formError.collectAsState()
+    val isSaving by viewModel.isSaving.collectAsState()
 
 
     LaunchedEffect(activeRecord?.id) {
@@ -95,6 +103,9 @@ fun RecordFormScreen(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
+            if (isSaving) {
+                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+            }
             OutlinedTextField(
                 value = serialState.value,
                 onValueChange = {
@@ -149,6 +160,7 @@ fun RecordFormScreen(
 
             Button(
                 onClick = {
+                    if (isSaving) return@Button
                     val record = activeRecord?.copy(
                         sirimSerialNo = serialState.value.text,
                         batchNo = batchState.value.text,
@@ -171,9 +183,26 @@ fun RecordFormScreen(
                         onSaved()
                     }
                 },
+                enabled = !isSaving,
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Text("Save Record")
+                if (isSaving) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(20.dp),
+                            strokeWidth = 2.dp,
+                            color = MaterialTheme.colorScheme.onPrimary
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text("Saving…")
+                    }
+                } else {
+                    Text("Save Record")
+                }
             }
         }
     }
