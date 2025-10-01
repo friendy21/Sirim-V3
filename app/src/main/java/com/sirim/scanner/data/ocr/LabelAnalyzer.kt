@@ -61,6 +61,7 @@ class LabelAnalyzer(
 
             if (textSegments.isEmpty()) {
                 for (angle in ROTATION_ANGLES) {
+
                     var rotated: Bitmap? = null
                     try {
                         rotated = processed.enhanced.rotate(angle)
@@ -78,6 +79,12 @@ class LabelAnalyzer(
                         }
                     }
                 }
+
+            val combinedText = textSegments.joinToString("\n") { it.trim() }
+            val parsedFields = if (combinedText.isNotBlank()) {
+                SirimLabelParser.parse(combinedText).toMutableMap()
+            } else {
+                mutableMapOf()
             }
 
             val combinedText = textSegments.joinToString("\n") { it.trim() }
