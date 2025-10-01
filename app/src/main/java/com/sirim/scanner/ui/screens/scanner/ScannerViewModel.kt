@@ -6,6 +6,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.sirim.scanner.data.db.SirimRecord
 import com.sirim.scanner.data.ocr.FieldConfidence
+import com.sirim.scanner.data.ocr.OcrFailureReason
 import com.sirim.scanner.data.ocr.LabelAnalyzer
 import com.sirim.scanner.data.ocr.OcrResult
 import com.sirim.scanner.data.ocr.toJpegByteArray
@@ -123,25 +124,42 @@ class ScannerViewModel private constructor(
             imageProxy.close()
             return
         }
-        _status.value = _status.value.copy(state = ScanState.Scanning, message = "Analyzing frame...", confidence = 0f)
-        viewModelScope.launch {
-            try {
-                when (val result = analyzer.analyze(imageProxy)) {
-                    is OcrResult.Success -> handleResult(result, autoPersist = true)
-                    is OcrResult.Partial -> handleResult(result, autoPersist = false)
-                    OcrResult.Empty -> {
-                        _status.value = ScanStatus(state = ScanState.Idle, message = "Align the label within the guide")
-                        _extractedFields.value = emptyMap()
-                        _validationWarnings.value = emptyMap()
-                        _validationErrors.value = emptyMap()
+        try {
+            viewModelScope.launch {
+                try {
+                    val result = analyzer.analyze(imageProxy)
+                    if (result !is OcrResult.Skipped) {
+                        _status.value = _status.value.copy(
+                            state = ScanState.Scanning,
+                            message = "Analyzing frame...",
+                            confidence = 0f
+                        )
                     }
+                    when (result) {
+                        is OcrResult.Success -> handleResult(result, autoPersist = true)
+                        is OcrResult.Partial -> handleResult(result, autoPersist = false)
+                        is OcrResult.Failure -> handleFailure(result)
+                        OcrResult.Empty -> {
+                            _status.value = ScanStatus(state = ScanState.Idle, message = "Align the label within the guide")
+                            _extractedFields.value = emptyMap()
+                            _validationWarnings.value = emptyMap()
+                            _validationErrors.value = emptyMap()
+                        }
+                        OcrResult.Skipped -> {
+                            // No-op: frame skipped to throttle analysis rate.
+                        }
+                    }
+                } catch (ex: Exception) {
+                    _status.value = ScanStatus(state = ScanState.Error, message = "Scan failed: ${ex.message ?: "Unknown error"}")
+                } finally {
+                    imageProxy.close()
+                    processing.set(false)
                 }
-            } catch (ex: Exception) {
-                _status.value = ScanStatus(state = ScanState.Error, message = "Scan failed: ${ex.message ?: "Unknown error"}")
-            } finally {
-                imageProxy.close()
-                processing.set(false)
             }
+        } catch (ex: Exception) {
+            imageProxy.close()
+            processing.set(false)
+            throw ex
         }
     }
 
@@ -191,6 +209,19 @@ class ScannerViewModel private constructor(
         if (autoPersist && validation.errors.isEmpty()) {
             persistIfUnique(validation, result as OcrResult.Success)
         }
+    }
+
+    private fun handleFailure(result: OcrResult.Failure) {
+        _extractedFields.value = emptyMap()
+        _validationWarnings.value = emptyMap()
+        _validationErrors.value = emptyMap()
+        val (state, message) = when (result.reason) {
+            OcrFailureReason.Preprocessing -> ScanState.Error to "Unable to stabilise the frame. Adjust distance or lighting."
+            OcrFailureReason.MissingTesseractModel -> ScanState.Error to (
+                result.detail ?: "Tesseract model missing. Copy eng.traineddata to enable offline OCR."
+            )
+        }
+        _status.value = ScanStatus(state = state, message = message, confidence = 0f, frames = 0)
     }
 
     private fun persistIfUnique(validation: ValidationResult, result: OcrResult.Success) {

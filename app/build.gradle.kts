@@ -62,6 +62,7 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.1")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.10.1")
 
+    // Latest releases verified via https://dl.google.com/dl/android/maven2 metadata (2024-08-07 for text recognition)
     implementation("com.google.mlkit:text-recognition:16.0.1")
     implementation("com.google.mlkit:barcode-scanning:17.3.0")
 
@@ -72,7 +73,8 @@ dependencies {
 
     implementation("com.google.zxing:core:3.5.3")
 
-    implementation("cz.adaptech:tesseract4android:4.8.0")
+    // JitPack artifact 4.9.0 bundles Tesseract 5.5.x and replaces the deprecated tess-two fork
+    implementation("com.github.adaptech-cz:tesseract4android:4.9.0")
 
     implementation("androidx.room:room-runtime:2.7.0")
     kapt("androidx.room:room-compiler:2.7.0")

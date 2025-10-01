@@ -36,7 +36,7 @@ class PreprocessedImage internal constructor(
 object ImagePreprocessor {
 
     private val opencvInitialised = AtomicBoolean(false)
-    private const val MAX_DIMENSION = 1280
+    private const val MAX_DIMENSION = 960
 
     fun preprocess(imageProxy: ImageProxy): PreprocessedImage? {
         val original = imageProxy.toBitmap()?.ensureMaxDimension(MAX_DIMENSION) ?: return null

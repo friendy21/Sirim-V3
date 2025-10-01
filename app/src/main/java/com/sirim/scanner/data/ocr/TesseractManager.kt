@@ -7,6 +7,7 @@ import java.io.File
 import java.io.FileOutputStream
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlin.jvm.Volatile
 
 class TesseractManager(context: Context) {
 
@@ -18,6 +19,8 @@ class TesseractManager(context: Context) {
 
     private var tessBaseApi: TessBaseAPI? = null
     private var initialised = false
+    @Volatile
+    private var status: TesseractStatus = TesseractStatus.Idle
 
     suspend fun recognise(bitmap: Bitmap): String? = mutex.withLock {
         if (!ensureEngine()) return null
@@ -39,7 +42,15 @@ class TesseractManager(context: Context) {
 
         val engine = TessBaseAPI()
         val hasTrainedData = ensureTrainedDataExists()
-        val success = hasTrainedData && runCatching {
+        if (!hasTrainedData) {
+            status = TesseractStatus.MissingModel
+            engine.end()
+            initialised = true
+            tessBaseApi = null
+            return false
+        }
+
+        val success = runCatching {
             engine.init(baseDir.absolutePath, "eng")
         }.getOrDefault(false)
 
@@ -48,9 +59,11 @@ class TesseractManager(context: Context) {
             engine.setVariable("tessedit_char_whitelist", "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-/. ")
             engine.setVariable("textord_heavy_nr", "1")
             tessBaseApi = engine
+            status = TesseractStatus.Ready
         } else {
             engine.end()
             tessBaseApi = null
+            status = TesseractStatus.InitFailed
         }
 
         initialised = true
@@ -63,7 +76,11 @@ class TesseractManager(context: Context) {
             return true
         }
 
-        return copyBundledModel(trainedData)
+        val copied = copyBundledModel(trainedData)
+        if (!copied) {
+            status = TesseractStatus.MissingModel
+        }
+        return copied
     }
 
     private fun copyBundledModel(destination: File): Boolean {
@@ -79,4 +96,15 @@ class TesseractManager(context: Context) {
             destination.exists()
         }.getOrElse { false }
     }
+
+    fun status(): TesseractStatus = status
+
+    fun isModelAvailable(): Boolean = status == TesseractStatus.Ready
+}
+
+enum class TesseractStatus {
+    Idle,
+    Ready,
+    MissingModel,
+    InitFailed
 }
