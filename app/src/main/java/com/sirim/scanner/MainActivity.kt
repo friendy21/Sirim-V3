@@ -36,6 +36,7 @@ import com.sirim.scanner.ui.screens.startup.StartupScreen
 import com.sirim.scanner.ui.theme.SirimScannerTheme
 import com.sirim.scanner.ui.viewmodel.PreferencesViewModel
 import com.sirim.scanner.data.preferences.StartupPage
+import kotlinx.coroutines.delay
 
 class MainActivity : ComponentActivity() {
 
@@ -102,7 +103,12 @@ private fun NavGraph(container: AppContainer, navController: NavHostController) 
             showAuthDialog = false
         }
     }
-
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(60_000)
+            preferencesViewModel.checkSessionExpiry()
+        }
+    }
     NavHost(navController = navController, startDestination = Destinations.StartupResolver.route) {
         composable(Destinations.StartupResolver.route) {
             LaunchedEffect(preferences.startupPage) {

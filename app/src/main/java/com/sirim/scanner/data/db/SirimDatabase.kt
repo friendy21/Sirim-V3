@@ -17,27 +17,35 @@ abstract class SirimDatabase : RoomDatabase() {
     companion object {
         val MIGRATION_1_2: Migration = object : Migration(1, 2) {
             override fun migrate(database: SupportSQLiteDatabase) {
-                database.execSQL(
-                    "CREATE TABLE IF NOT EXISTS sku_records (" +
-                        "id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
-                        "barcode TEXT NOT NULL, " +
-                        "batch_no TEXT, " +
-                        "brand_trademark TEXT, " +
-                        "model TEXT, " +
-                        "type TEXT, " +
-                        "rating TEXT, " +
-                        "size TEXT, " +
-                        "image_path TEXT, " +
-                        "created_at INTEGER NOT NULL, " +
-                        "is_verified INTEGER NOT NULL, " +
-                        "needs_sync INTEGER NOT NULL, " +
-                        "server_id TEXT, " +
-                        "last_synced INTEGER)"
-                )
-                database.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS index_sku_records_barcode ON sku_records(barcode)")
-                database.execSQL("CREATE INDEX IF NOT EXISTS index_sku_records_created_at ON sku_records(created_at)")
-                database.execSQL("CREATE INDEX IF NOT EXISTS index_sku_records_brand_trademark ON sku_records(brand_trademark)")
-                database.execSQL("CREATE INDEX IF NOT EXISTS index_sku_records_is_verified ON sku_records(is_verified)")
+                database.execSQL("BEGIN TRANSACTION")
+                try {
+                    database.execSQL(
+                        "CREATE TABLE IF NOT EXISTS sku_records (" +
+                            "id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                            "barcode TEXT NOT NULL, " +
+                            "batch_no TEXT, " +
+                            "brand_trademark TEXT, " +
+                            "model TEXT, " +
+                            "type TEXT, " +
+                            "rating TEXT, " +
+                            "size TEXT, " +
+                            "image_path TEXT, " +
+                            "created_at INTEGER NOT NULL, " +
+                            "is_verified INTEGER NOT NULL, " +
+                            "needs_sync INTEGER NOT NULL, " +
+                            "server_id TEXT, " +
+                            "last_synced INTEGER)"
+                    )
+                    database.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS index_sku_records_barcode ON sku_records(barcode)")
+                    database.execSQL("CREATE INDEX IF NOT EXISTS index_sku_records_created_at ON sku_records(created_at)")
+                    database.execSQL("CREATE INDEX IF NOT EXISTS index_sku_records_brand_trademark ON sku_records(brand_trademark)")
+                    database.execSQL("CREATE INDEX IF NOT EXISTS index_sku_records_is_verified ON sku_records(is_verified)")
+                    database.execSQL("COMMIT")
+                } catch (error: Exception) {
+                    database.execSQL("ROLLBACK")
+                    throw error
+                }
+
             }
         }
     }

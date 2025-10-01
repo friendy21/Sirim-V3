@@ -13,6 +13,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -25,9 +26,12 @@ class RecordViewModel private constructor(
         .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
 
     private val searchQuery = MutableStateFlow("")
+    private val debouncedQuery = searchQuery
+        .debounce(300)
+        .stateIn(viewModelScope, SharingStarted.Eagerly, "")
     private val filters = MutableStateFlow(RecordFilters())
 
-    val uiState: StateFlow<RecordListUiState> = combine(allRecords, searchQuery, filters) { records, query, filters ->
+    val uiState: StateFlow<RecordListUiState> = combine(allRecords, debouncedQuery, filters) { records, query, filters ->
         val normalizedQuery = query.trim()
         val availableBrands = records.mapNotNull { it.brandTrademark.takeIf(String::isNotBlank) }
             .distinct()
