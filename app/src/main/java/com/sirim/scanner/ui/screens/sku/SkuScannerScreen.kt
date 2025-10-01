@@ -1,5 +1,4 @@
 package com.sirim.scanner.ui.screens.sku
-
 import android.Manifest
 import android.content.pm.PackageManager
 import android.view.HapticFeedbackConstants
@@ -390,3 +389,4 @@ private fun View.afterMeasured(block: View.() -> Unit) {
         })
     }
 }
+

@@ -55,6 +55,7 @@ class PreferencesViewModel private constructor(
         }
     }
 
+=
     fun checkSessionExpiry() {
         viewModelScope.launch {
             val currentPreferences = preferences.value
@@ -63,6 +64,7 @@ class PreferencesViewModel private constructor(
             }
         }
     }
+
 
     fun clearAuthError() {
         _authError.value = null

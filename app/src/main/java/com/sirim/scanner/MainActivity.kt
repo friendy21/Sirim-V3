@@ -103,14 +103,12 @@ private fun NavGraph(container: AppContainer, navController: NavHostController) 
             showAuthDialog = false
         }
     }
-
     LaunchedEffect(Unit) {
         while (true) {
             delay(60_000)
             preferencesViewModel.checkSessionExpiry()
         }
     }
-
     NavHost(navController = navController, startDestination = Destinations.StartupResolver.route) {
         composable(Destinations.StartupResolver.route) {
             LaunchedEffect(preferences.startupPage) {

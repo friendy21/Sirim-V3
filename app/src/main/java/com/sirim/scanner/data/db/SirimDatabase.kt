@@ -45,6 +45,7 @@ abstract class SirimDatabase : RoomDatabase() {
                     database.execSQL("ROLLBACK")
                     throw error
                 }
+
             }
         }
     }
