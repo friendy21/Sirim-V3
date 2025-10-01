@@ -207,6 +207,11 @@ class ScannerViewModel private constructor(
             timestamp = System.currentTimeMillis(),
             captureConfidence = result.confidence
         )
+        result.bitmap?.let { bitmap ->
+            if (!bitmap.isRecycled) {
+                bitmap.recycle()
+            }
+        }
         appScope.launch {
             val duplicate = repository.findBySerial(pending.serial)
             if (duplicate != null) {
@@ -214,6 +219,15 @@ class ScannerViewModel private constructor(
                 return@launch
             }
             if (_batchMode.value) {
+                val alreadyQueued = _batchQueue.value.any { it.serial.equals(pending.serial, ignoreCase = true) }
+                if (alreadyQueued) {
+                    _status.value = _status.value.copy(
+                        state = ScanState.Duplicate,
+                        message = "${pending.serial} already queued",
+                        confidence = pending.captureConfidence
+                    )
+                    return@launch
+                }
                 _batchQueue.update { it + pending }
                 val queueSize = _batchQueue.value.size
                 _status.value = _status.value.copy(

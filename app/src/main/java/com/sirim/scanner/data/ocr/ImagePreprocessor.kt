@@ -5,6 +5,8 @@ import android.graphics.Rect
 import androidx.camera.core.ImageProxy
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.math.abs
+import kotlin.math.max
+import kotlin.math.roundToInt
 import org.opencv.android.OpenCVLoader
 import org.opencv.android.Utils
 import org.opencv.core.Core
@@ -16,18 +18,28 @@ import org.opencv.core.Rect as CvRect
 import org.opencv.core.Size
 import org.opencv.imgproc.Imgproc
 
-data class PreprocessedImage(
+class PreprocessedImage internal constructor(
     val original: Bitmap,
     val enhanced: Bitmap,
     val regionOfInterest: Rect?
-)
+) : AutoCloseable {
+    override fun close() {
+        if (!original.isRecycled) {
+            original.recycle()
+        }
+        if (!enhanced.isRecycled) {
+            enhanced.recycle()
+        }
+    }
+}
 
 object ImagePreprocessor {
 
     private val opencvInitialised = AtomicBoolean(false)
+    private const val MAX_DIMENSION = 1280
 
     fun preprocess(imageProxy: ImageProxy): PreprocessedImage? {
-        val original = imageProxy.toBitmap() ?: return null
+        val original = imageProxy.toBitmap()?.ensureMaxDimension(MAX_DIMENSION) ?: return null
         ensureOpenCv()
 
         val mats = mutableListOf<Mat>()
@@ -148,4 +160,19 @@ object ImagePreprocessor {
         val minArea = source.width() * source.height() * 0.1
         return if (rect.width * rect.height < minArea) null else rect
     }
+}
+
+private fun Bitmap.ensureMaxDimension(maxDimension: Int): Bitmap {
+    val largestSide = max(width, height)
+    if (largestSide <= maxDimension) {
+        return this
+    }
+    val scale = maxDimension.toFloat() / largestSide
+    val targetWidth = (width * scale).roundToInt().coerceAtLeast(1)
+    val targetHeight = (height * scale).roundToInt().coerceAtLeast(1)
+    val scaled = Bitmap.createScaledBitmap(this, targetWidth, targetHeight, true)
+    if (scaled !== this && !isRecycled) {
+        recycle()
+    }
+    return scaled
 }

@@ -17,6 +17,7 @@ import com.google.zxing.common.HybridBinarizer
 import com.google.zxing.RGBLuminanceSource
 import java.nio.ByteBuffer
 import java.util.ArrayDeque
+import kotlin.io.use
 import kotlin.math.max
 import kotlin.math.min
 import kotlinx.coroutines.tasks.await
@@ -37,78 +38,80 @@ class LabelAnalyzer(
     private val recentFrames = ArrayDeque<FrameObservation>()
 
     suspend fun analyze(imageProxy: ImageProxy): OcrResult {
-        val preprocessed = ImagePreprocessor.preprocess(imageProxy) ?: return OcrResult.Empty
+        return ImagePreprocessor.preprocess(imageProxy)?.use { preprocessed ->
+            val textSegments = mutableListOf<String>()
+            recognizeText(preprocessed.enhanced)?.let(textSegments::add)
 
-        val textSegments = mutableListOf<String>()
-        recognizeText(preprocessed.enhanced)?.let(textSegments::add)
-
-        val rotatedVariants = listOf(90f, -90f)
-        rotatedVariants.forEach { angle ->
-            var rotated: Bitmap? = null
-            try {
-                rotated = preprocessed.enhanced.rotate(angle)
-                if (rotated != null) {
-                    recognizeText(rotated)?.let(textSegments::add)
-                }
-            } finally {
-                if (rotated != null && rotated !== preprocessed.enhanced && !rotated.isRecycled) {
-                    rotated.recycle()
-                }
-            }
-        }
-
-        val combinedText = textSegments.joinToString("\n") { it.trim() }
-        val parsedFields = if (combinedText.isNotBlank()) {
-            SirimLabelParser.parse(combinedText).toMutableMap()
-        } else {
-            mutableMapOf()
-        }
-
-        val barcodeImage = InputImage.fromBitmap(preprocessed.original, 0)
-        val barcodeResults = barcodeScanner.safeProcess(barcodeImage)
-        val qrPayload = barcodeResults.firstOrNull()?.rawValue
-            ?: decodeWithZxing(preprocessed.original)
-            ?: preprocessed.regionOfInterest?.let { region ->
-                preprocessed.original.safeCrop(region)?.use { cropped ->
-                    decodeWithZxing(cropped)
+            val rotatedVariants = listOf(90f, -90f)
+            rotatedVariants.forEach { angle ->
+                var rotated: Bitmap? = null
+                try {
+                    rotated = preprocessed.enhanced.rotate(angle)
+                    if (rotated != null) {
+                        recognizeText(rotated)?.let(textSegments::add)
+                    }
+                } finally {
+                    if (rotated != null && rotated !== preprocessed.enhanced && !rotated.isRecycled) {
+                        rotated.recycle()
+                    }
                 }
             }
 
-        val qrField = SirimLabelParser.mergeWithQr(parsedFields, qrPayload)
-        val observation = FrameObservation(
-            fields = parsedFields,
-            qr = qrField,
-            confidence = parsedFields.averageConfidence()
-        )
-        val consensus = updateConsensus(observation)
+            val combinedText = textSegments.joinToString("\n") { it.trim() }
+            val parsedFields = if (combinedText.isNotBlank()) {
+                SirimLabelParser.parse(combinedText).toMutableMap()
+            } else {
+                mutableMapOf()
+            }
 
-        val aggregatedFields = consensus?.fields ?: parsedFields
-        val aggregatedConfidence = consensus?.confidence ?: observation.confidence
-        val frames = consensus?.frames ?: 1
-        val isStable = consensus?.isStable ?: (aggregatedConfidence >= successThreshold && frames >= 2)
+            val barcodeImage = InputImage.fromBitmap(preprocessed.original, 0)
+            val barcodeResults = barcodeScanner.safeProcess(barcodeImage)
+            val qrPayload = barcodeResults.firstOrNull()?.rawValue
+                ?: decodeWithZxing(preprocessed.original)
+                ?: preprocessed.regionOfInterest?.let { region ->
+                    preprocessed.original.safeCrop(region)?.use { cropped ->
+                        decodeWithZxing(cropped)
+                    }
+                }
 
-        if (aggregatedFields.isEmpty()) {
-            return OcrResult.Empty
-        }
-
-        val qrValue = consensus?.qr?.value ?: qrField?.value ?: qrPayload
-        return if (isStable) {
-            OcrResult.Success(
-                fields = aggregatedFields,
-                qrCode = qrValue,
-                bitmap = preprocessed.original,
-                confidence = aggregatedConfidence,
-                frames = frames
+            val qrField = SirimLabelParser.mergeWithQr(parsedFields, qrPayload)
+            val observation = FrameObservation(
+                fields = parsedFields,
+                qr = qrField,
+                confidence = parsedFields.averageConfidence()
             )
-        } else {
-            OcrResult.Partial(
-                fields = aggregatedFields,
-                qrCode = qrValue,
-                bitmap = preprocessed.original,
-                confidence = aggregatedConfidence,
-                frames = frames
-            )
-        }
+            val consensus = updateConsensus(observation)
+
+            val aggregatedFields = consensus?.fields ?: parsedFields
+            val aggregatedConfidence = consensus?.confidence ?: observation.confidence
+            val frames = consensus?.frames ?: 1
+            val isStable = consensus?.isStable ?: (aggregatedConfidence >= successThreshold && frames >= 2)
+
+            if (aggregatedFields.isEmpty()) {
+                return@use OcrResult.Empty
+            }
+
+            val qrValue = consensus?.qr?.value ?: qrField?.value ?: qrPayload
+            val resultBitmap = preprocessed.original.copy(Bitmap.Config.ARGB_8888, false)
+                ?: Bitmap.createBitmap(preprocessed.original)
+            if (isStable) {
+                OcrResult.Success(
+                    fields = aggregatedFields,
+                    qrCode = qrValue,
+                    bitmap = resultBitmap,
+                    confidence = aggregatedConfidence,
+                    frames = frames
+                )
+            } else {
+                OcrResult.Partial(
+                    fields = aggregatedFields,
+                    qrCode = qrValue,
+                    bitmap = resultBitmap,
+                    confidence = aggregatedConfidence,
+                    frames = frames
+                )
+            }
+        } ?: OcrResult.Empty
     }
 
     private fun updateConsensus(observation: FrameObservation): ConsensusResult? {
