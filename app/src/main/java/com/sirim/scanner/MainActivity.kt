@@ -7,6 +7,12 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavHostController
@@ -16,18 +22,20 @@ import androidx.navigation.compose.composable
 import androidx.navigation.navArgument
 import androidx.navigation.compose.rememberNavController
 import com.sirim.scanner.data.AppContainer
-import com.sirim.scanner.ui.screens.dashboard.DashboardScreen
-import com.sirim.scanner.ui.screens.dashboard.DashboardViewModel
 import com.sirim.scanner.ui.screens.export.ExportScreen
 import com.sirim.scanner.ui.screens.export.ExportViewModel
-import com.sirim.scanner.ui.screens.login.LoginScreen
-import com.sirim.scanner.ui.screens.login.LoginViewModel
+import com.sirim.scanner.ui.common.AuthenticationDialog
 import com.sirim.scanner.ui.screens.records.RecordFormScreen
 import com.sirim.scanner.ui.screens.records.RecordListScreen
 import com.sirim.scanner.ui.screens.records.RecordViewModel
 import com.sirim.scanner.ui.screens.scanner.ScannerScreen
 import com.sirim.scanner.ui.screens.scanner.ScannerViewModel
+import com.sirim.scanner.ui.screens.settings.SettingsScreen
+import com.sirim.scanner.ui.screens.sku.SkuScannerScreen
+import com.sirim.scanner.ui.screens.startup.StartupScreen
 import com.sirim.scanner.ui.theme.SirimScannerTheme
+import com.sirim.scanner.ui.viewmodel.PreferencesViewModel
+import com.sirim.scanner.data.preferences.StartupPage
 
 class MainActivity : ComponentActivity() {
 
@@ -51,12 +59,14 @@ class MainActivity : ComponentActivity() {
 }
 
 sealed class Destinations(val route: String) {
-    data object Login : Destinations("login")
-    data object Dashboard : Destinations("dashboard")
-    data object Scanner : Destinations("scanner")
-    data object RecordList : Destinations("records")
-    data object RecordForm : Destinations("recordForm")
+    data object StartupResolver : Destinations("startup_resolver")
+    data object Startup : Destinations("startup")
+    data object SirimScanner : Destinations("sirim_scanner")
+    data object SkuScanner : Destinations("sku_scanner")
+    data object Storage : Destinations("storage")
+    data object RecordForm : Destinations("record_form")
     data object Export : Destinations("export")
+    data object Settings : Destinations("settings")
 }
 
 @Composable
@@ -67,30 +77,55 @@ fun SirimApp(container: AppContainer) {
 
 @Composable
 private fun NavGraph(container: AppContainer, navController: NavHostController) {
-    NavHost(navController = navController, startDestination = Destinations.Login.route) {
-        composable(Destinations.Login.route) {
-            val viewModel: LoginViewModel = viewModel(factory = LoginViewModel.Factory())
-            LoginScreen(
-                viewModel = viewModel,
-                onAuthenticated = {
-                    navController.navigate(Destinations.Dashboard.route) {
-                        popUpTo(Destinations.Login.route) { inclusive = true }
-                    }
+    val preferencesViewModel: PreferencesViewModel = viewModel(
+        factory = PreferencesViewModel.Factory(container.preferencesManager)
+    )
+    val preferences by preferencesViewModel.preferences.collectAsState()
+    val isSessionValid by preferencesViewModel.isSessionValid.collectAsState()
+    val authError by preferencesViewModel.authError.collectAsState()
+    var showAuthDialog by remember { mutableStateOf(false) }
+    var pendingAction by remember { mutableStateOf<(() -> Unit)?>(null) }
+
+    fun requestAuthentication(afterAuth: () -> Unit) {
+        if (isSessionValid) {
+            afterAuth()
+        } else {
+            pendingAction = afterAuth
+            showAuthDialog = true
+        }
+    }
+
+    LaunchedEffect(isSessionValid) {
+        if (isSessionValid && pendingAction != null) {
+            pendingAction?.invoke()
+            pendingAction = null
+            showAuthDialog = false
+        }
+    }
+
+    NavHost(navController = navController, startDestination = Destinations.StartupResolver.route) {
+        composable(Destinations.StartupResolver.route) {
+            LaunchedEffect(preferences.startupPage) {
+                val target = when (preferences.startupPage) {
+                    StartupPage.AskEveryTime -> Destinations.Startup.route
+                    StartupPage.SirimScanner -> Destinations.SirimScanner.route
+                    StartupPage.SkuScanner -> Destinations.SkuScanner.route
+                    StartupPage.Storage -> Destinations.Storage.route
                 }
+                navController.navigate(target) {
+                    popUpTo(Destinations.StartupResolver.route) { inclusive = true }
+                }
+            }
+        }
+        composable(Destinations.Startup.route) {
+            StartupScreen(
+                onOpenSirimScanner = { navController.navigate(Destinations.SirimScanner.route) },
+                onOpenSkuScanner = { navController.navigate(Destinations.SkuScanner.route) },
+                onOpenStorage = { navController.navigate(Destinations.Storage.route) },
+                onOpenSettings = { navController.navigate(Destinations.Settings.route) }
             )
         }
-        composable(Destinations.Dashboard.route) {
-            val viewModel: DashboardViewModel = viewModel(
-                factory = DashboardViewModel.Factory(container.repository)
-            )
-            DashboardScreen(
-                viewModel = viewModel,
-                navigateToScanner = { navController.navigate(Destinations.Scanner.route) },
-                navigateToRecords = { navController.navigate(Destinations.RecordList.route) },
-                navigateToExport = { navController.navigate(Destinations.Export.route) }
-            )
-        }
-        composable(Destinations.Scanner.route) {
+        composable(Destinations.SirimScanner.route) {
             val viewModel: ScannerViewModel = viewModel(
                 factory = ScannerViewModel.Factory(
                     repository = container.repository,
@@ -103,22 +138,33 @@ private fun NavGraph(container: AppContainer, navController: NavHostController) 
                 onBack = { navController.popBackStack() },
                 onRecordSaved = { id ->
                     navController.navigate("${Destinations.RecordForm.route}?recordId=$id") {
-                        popUpTo(Destinations.Scanner.route) { inclusive = true }
+                        popUpTo(Destinations.SirimScanner.route) { inclusive = true }
                     }
                 }
             )
         }
-        composable(Destinations.RecordList.route) {
+        composable(Destinations.SkuScanner.route) {
+            SkuScannerScreen(
+                onBack = { navController.popBackStack() },
+                onRecordSaved = {},
+                repository = container.repository,
+                analyzer = container.barcodeAnalyzer,
+                appScope = container.applicationScope
+            )
+        }
+        composable(Destinations.Storage.route) {
             val viewModel: RecordViewModel = viewModel(
                 factory = RecordViewModel.Factory(container.repository)
             )
             RecordListScreen(
                 viewModel = viewModel,
-                onAdd = { navController.navigate("${Destinations.RecordForm.route}") },
+                onAdd = { navController.navigate(Destinations.RecordForm.route) },
                 onEdit = { record ->
                     navController.navigate("${Destinations.RecordForm.route}?recordId=${record.id}")
                 },
-                onBack = { navController.popBackStack() }
+                onBack = { navController.popBackStack() },
+                isAuthenticated = isSessionValid,
+                onRequireAuthentication = { action -> requestAuthentication(action) }
             )
         }
         composable(
@@ -151,5 +197,31 @@ private fun NavGraph(container: AppContainer, navController: NavHostController) 
                 onBack = { navController.popBackStack() }
             )
         }
+        composable(Destinations.Settings.route) {
+            SettingsScreen(
+                preferences = preferences,
+                authError = authError,
+                onStartupSelected = preferencesViewModel::setStartupPage,
+                onAuthenticate = { username, password ->
+                    preferencesViewModel.authenticate(username, password)
+                },
+                onLogout = preferencesViewModel::logout,
+                onDismissAuthError = preferencesViewModel::clearAuthError,
+                onBack = { navController.popBackStack() }
+            )
+        }
     }
+
+    AuthenticationDialog(
+        visible = showAuthDialog,
+        error = authError,
+        onDismiss = {
+            showAuthDialog = false
+            pendingAction = null
+            preferencesViewModel.clearAuthError()
+        },
+        onAuthenticate = { username, password ->
+            preferencesViewModel.authenticate(username, password)
+        }
+    )
 }

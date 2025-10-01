@@ -3,35 +3,68 @@ package com.sirim.scanner.data.repository
 import android.content.Context
 import com.sirim.scanner.data.db.SirimRecord
 import com.sirim.scanner.data.db.SirimRecordDao
+import com.sirim.scanner.data.db.SkuRecord
+import com.sirim.scanner.data.db.SkuRecordDao
+import com.sirim.scanner.data.db.StorageRecord
+import com.sirim.scanner.data.db.asStorageRecords
 import java.io.File
 import java.io.FileOutputStream
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
 class SirimRepositoryImpl(
-    private val dao: SirimRecordDao,
+    private val sirimDao: SirimRecordDao,
+    private val skuDao: SkuRecordDao,
     private val context: Context
 ) : SirimRepository {
 
     private val fileMutex = Mutex()
 
-    override val records: Flow<List<SirimRecord>> = dao.getAllRecords()
+    override val sirimRecords: Flow<List<SirimRecord>> = sirimDao.getAllRecords()
 
-    override fun search(query: String): Flow<List<SirimRecord>> =
-        dao.searchRecords("%$query%")
+    override val skuRecords: Flow<List<SkuRecord>> = skuDao.getAllRecords()
 
-    override suspend fun upsert(record: SirimRecord): Long = dao.upsert(record)
+    override val storageRecords: Flow<List<StorageRecord>> = combine(sirimRecords, skuRecords) { sirim, sku ->
+        (sirim.asStorageRecords() + sku.asStorageRecords()).sortedByDescending(StorageRecord::createdAt)
+    }
+
+    override fun searchSirim(query: String): Flow<List<SirimRecord>> = sirimDao.searchRecords("%$query%")
+
+    override fun searchSku(query: String): Flow<List<SkuRecord>> = skuDao.searchRecords("%$query%")
+
+    override fun searchAll(query: String): Flow<List<StorageRecord>> =
+        combine(searchSirim(query), searchSku(query)) { sirim, sku ->
+            (sirim.asStorageRecords() + sku.asStorageRecords()).sortedByDescending(StorageRecord::createdAt)
+        }
+
+    override suspend fun upsert(record: SirimRecord): Long = sirimDao.upsert(record)
+
+    override suspend fun upsertSku(record: SkuRecord): Long = skuDao.upsert(record)
 
     override suspend fun delete(record: SirimRecord) {
         record.imagePath?.let { path ->
             runCatching { File(path).takeIf(File::exists)?.delete() }
         }
-        dao.delete(record)
+        sirimDao.delete(record)
     }
 
-    override suspend fun getRecord(id: Long): SirimRecord? = dao.getRecordById(id)
-    override suspend fun findBySerial(serial: String): SirimRecord? = dao.findBySerial(serial)
+    override suspend fun deleteSku(record: SkuRecord) {
+        record.imagePath?.let { path ->
+            runCatching { File(path).takeIf(File::exists)?.delete() }
+        }
+        skuDao.delete(record)
+    }
+
+    override suspend fun getRecord(id: Long): SirimRecord? = sirimDao.getRecordById(id)
+
+    override suspend fun getSkuRecord(id: Long): SkuRecord? = skuDao.getRecordById(id)
+
+    override suspend fun findBySerial(serial: String): SirimRecord? = sirimDao.findBySerial(serial)
+
+    override suspend fun findByBarcode(barcode: String): SkuRecord? = skuDao.findByBarcode(barcode)
+
     override suspend fun persistImage(bytes: ByteArray, extension: String): String {
         val directory = File(context.filesDir, "captured")
         if (!directory.exists()) directory.mkdirs()
