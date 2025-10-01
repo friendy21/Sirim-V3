@@ -11,11 +11,23 @@ data class ValidationResult(
 
 object FieldValidator {
 
-    private val serialRegex = Regex("^(TEA\d{7}|T\d{9})$", RegexOption.IGNORE_CASE)
-    private val batchRegex = Regex("^[A-Z0-9-]{1,200}$", RegexOption.IGNORE_CASE)
-    private val alphaNumeric = Regex("^[A-Za-z0-9 .,&'\-\/]{1,1500}$")
-    private val ratingRegex = Regex("^(SAE\s*[0-9]{1,2}W-?[0-9]{1,2}|[A-Za-z0-9 .,&'\-\/]{1,600})$", RegexOption.IGNORE_CASE)
-    private val sizeRegex = Regex("^[0-9]+\s*(L|ML|LITRE|LTR|KG)$", RegexOption.IGNORE_CASE)
+    // TEA + 7 digits  OR  T + 9 digits  (case-insensitive)
+    private val serialRegex = Regex("""^(TEA\d{7}|T\d{9})$""", RegexOption.IGNORE_CASE)
+
+    // Uppercase letters, digits, dash; up to 200 chars
+    private val batchRegex = Regex("""^[A-Z0-9-]{1,200}$""", RegexOption.IGNORE_CASE)
+
+    // Alphanumeric plus space and a few punctuation marks; put '-' at end to avoid ranges
+    private val alphaNumeric = Regex("""^[A-Za-z0-9 .,&'/-]{1,1500}$""")
+
+    // Either an SAE oil rating like "SAE 10W-40" OR fall back to the relaxed alphanumeric
+    private val ratingRegex = Regex(
+        """^(SAE\s*[0-9]{1,2}W-?[0-9]{1,2}|[A-Za-z0-9 .,&'/-]{1,600})$""",
+        RegexOption.IGNORE_CASE
+    )
+
+    // Number + optional whitespace + unit
+    private val sizeRegex = Regex("""^[0-9]+\s*(L|ML|LITRE|LTR|KG)$""", RegexOption.IGNORE_CASE)
 
     fun validate(fields: Map<String, FieldConfidence>): ValidationResult {
         val sanitized = mutableMapOf<String, FieldConfidence>()
@@ -25,6 +37,7 @@ object FieldValidator {
         fields.forEach { (key, confidence) ->
             val trimmed = confidence.value.trim()
             val updated = confidence.copy(value = trimmed)
+
             when (key) {
                 "sirimSerialNo" -> handleSerial(updated, sanitized, errors, warnings)
                 "batchNo" -> handlePattern(updated, batchRegex, sanitized, warnings, key)
@@ -33,6 +46,7 @@ object FieldValidator {
                 "size" -> handlePattern(updated, sizeRegex, sanitized, warnings, key)
                 else -> sanitized[key] = updated
             }
+
             val notes = sanitized[key]?.notes ?: return@forEach
             if (FieldNote.CONFLICT in notes) {
                 warnings.putIfAbsent(key, "Mismatch between QR data and OCR text")
@@ -66,13 +80,13 @@ object FieldValidator {
         warnings: MutableMap<String, String>
     ) {
         val normalized = confidence.value.uppercase()
-        val cleaned = normalized.replace("-", "")
+        val cleaned = normalized.replace("-", "").replace(" ", "")
         if (serialRegex.matches(cleaned)) {
-            val adjusted = confidence.copy(value = cleaned)
-            sanitized["sirimSerialNo"] = adjusted
+            sanitized["sirimSerialNo"] = confidence.copy(value = cleaned)
         } else {
             val newNotes = confidence.notes + FieldNote.FORMAT_MISMATCH
-            sanitized["sirimSerialNo"] = confidence.copy(value = cleaned, confidence = confidence.confidence * 0.6f, notes = newNotes)
+            sanitized["sirimSerialNo"] =
+                confidence.copy(value = cleaned, confidence = confidence.confidence * 0.6f, notes = newNotes)
             warnings["sirimSerialNo"] = "Serial number format could not be verified"
         }
     }
@@ -86,17 +100,20 @@ object FieldValidator {
     ) {
         if (confidence.value.isEmpty()) return
         val matches = regex.matches(confidence.value)
-        val updated = if (matches) confidence else confidence.copy(
-            confidence = confidence.confidence * 0.75f,
-            notes = confidence.notes + FieldNote.FORMAT_MISMATCH
-        )
-        sanitized[key] = updated
-        if (!matches) {
-            warnings[key] = "${prettyFieldName(key)} format may be invalid"
+        val updated = if (matches) {
+            confidence
+        } else {
+            confidence.copy(
+                confidence = confidence.confidence * 0.75f,
+                notes = confidence.notes + FieldNote.FORMAT_MISMATCH
+            )
         }
+        sanitized[key] = updated
+        if (!matches) warnings[key] = "${prettyFieldName(key)} format may be invalid"
     }
 
-    private fun prettyFieldName(field: String): String = field.replace(Regex("([A-Z])")) {
-        " " + it.value.lowercase()
-    }.trim().replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() }
+    private fun prettyFieldName(field: String): String =
+        field.replace(Regex("([A-Z])")) { " " + it.value.lowercase() }
+            .trim()
+            .replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() }
 }

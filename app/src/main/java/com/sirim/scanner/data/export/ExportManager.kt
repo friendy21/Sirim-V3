@@ -8,8 +8,6 @@ import com.itextpdf.layout.Document
 import com.itextpdf.layout.element.Cell
 import com.itextpdf.layout.element.Paragraph
 import com.itextpdf.layout.element.Table
-import com.sirim.scanner.data.export.ExportFormat
-
 import com.sirim.scanner.data.db.SirimRecord
 import java.io.File
 import java.io.FileOutputStream
@@ -38,17 +36,25 @@ class ExportManager(private val context: Context) {
     fun exportToPdf(records: List<SirimRecord>): Uri {
         val file = createExportFile("pdf")
         PdfWriter(FileOutputStream(file)).use { writer ->
-            val document = Document(com.itextpdf.kernel.pdf.PdfDocument(writer))
+            val pdfDoc = com.itextpdf.kernel.pdf.PdfDocument(writer)
+            val document = Document(pdfDoc)
+
             document.add(Paragraph("SIRIM Records"))
-            val table = Table(headers.size.toFloat())
+
+            // iText 7/8 requires FloatArray for column widths
+            val columnWidths = FloatArray(headers.size) { 1f }
+            val table = Table(columnWidths)
+
             headers.forEach { header ->
                 table.addHeaderCell(Cell().add(Paragraph(header)))
             }
+
             records.forEach { record ->
                 record.toFieldList().forEach { value ->
                     table.addCell(Cell().add(Paragraph(value)))
                 }
             }
+
             document.add(table)
             document.close()
         }
@@ -155,7 +161,7 @@ class ExportManager(private val context: Context) {
                 row.createCell(columnIndex).setCellValue(value)
             }
         }
-        sheet.setAutoFilter(CellRangeAddress(0, records.size, 0, headers.lastIndex)) 
+        sheet.setAutoFilter(CellRangeAddress(0, records.size, 0, headers.lastIndex))
     }
 
     private fun createBrandSheet(sheet: org.apache.poi.ss.usermodel.Sheet, records: List<SirimRecord>) {

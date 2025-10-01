@@ -44,7 +44,7 @@ object ImagePreprocessor {
         val equalized = Mat()
         mats += equalized
         clahe.apply(gray, equalized)
-        clahe.close()
+        // Note: clahe doesn't have a release() method in OpenCV Android
 
         val denoised = Mat()
         mats += denoised
