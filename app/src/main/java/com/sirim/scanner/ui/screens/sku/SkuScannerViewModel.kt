@@ -15,8 +15,9 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
-import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 class SkuScannerViewModel private constructor(
     private val repository: SirimRepository,
@@ -35,6 +36,7 @@ class SkuScannerViewModel private constructor(
 
     private val _batchMode = MutableStateFlow(false)
     private val _batchQueue = MutableStateFlow<List<SkuPendingRecord>>(emptyList())
+    private val batchMutex = Mutex()
 
     val batchUiState: StateFlow<SkuBatchUiState> = combine(_batchMode, _batchQueue) { enabled, queue ->
         SkuBatchUiState(
@@ -65,18 +67,34 @@ class SkuScannerViewModel private constructor(
     }
 
     fun clearBatchQueue() {
-        if (_batchQueue.value.isEmpty()) return
-        _batchQueue.value = emptyList()
-        _status.value = SkuScanStatus(message = "Batch queue cleared")
+        viewModelScope.launch {
+            val cleared = batchMutex.withLock {
+                if (_batchQueue.value.isEmpty()) {
+                    return@withLock false
+                }
+                _batchQueue.value = emptyList()
+                true
+            }
+            if (cleared) {
+                _status.value = SkuScanStatus(message = "Batch queue cleared")
+            }
+        }
     }
 
     fun saveBatch() {
-        val queued = _batchQueue.value
-        if (queued.isEmpty()) {
-            _status.value = _status.value.copy(message = "No queued barcodes to save")
-            return
-        }
         appScope.launch {
+            val queued = batchMutex.withLock {
+                if (_batchQueue.value.isEmpty()) {
+                    return@withLock emptyList()
+                }
+                val snapshot = _batchQueue.value
+                _batchQueue.value = emptyList()
+                snapshot
+            }
+            if (queued.isEmpty()) {
+                _status.value = _status.value.copy(message = "No queued barcodes to save")
+                return@launch
+            }
             val savedIds = mutableListOf<Long>()
             val skipped = mutableListOf<String>()
             queued.forEach { pending ->
@@ -89,7 +107,6 @@ class SkuScannerViewModel private constructor(
                 val id = repository.upsertSku(record)
                 savedIds += id
             }
-            _batchQueue.value = emptyList()
             _batchMode.value = false
             if (savedIds.isNotEmpty()) {
                 _lastSavedId.value = savedIds.last()
@@ -148,16 +165,6 @@ class SkuScannerViewModel private constructor(
         lastDetectionTimestamp = now
 
         if (_batchMode.value) {
-            val alreadyQueued = _batchQueue.value.any { it.barcode == normalized }
-            if (alreadyQueued) {
-                _status.value = SkuScanStatus(
-                    state = SkuScanState.Batch,
-                    message = "Barcode already queued",
-                    barcode = normalized,
-                    format = detection.format
-                )
-                return
-            }
             val existing = repository.findByBarcode(normalized)
             if (existing != null) {
                 _status.value = SkuScanStatus(
@@ -168,16 +175,25 @@ class SkuScannerViewModel private constructor(
                 )
                 return
             }
-            _batchQueue.update { current ->
-                current + SkuPendingRecord(
+            val queueSize = addToBatchQueue(
+                SkuPendingRecord(
                     barcode = normalized,
                     format = detection.format,
                     capturedAt = now
                 )
+            )
+            if (queueSize == null) {
+                _status.value = SkuScanStatus(
+                    state = SkuScanState.Batch,
+                    message = "Barcode already queued",
+                    barcode = normalized,
+                    format = detection.format
+                )
+                return
             }
             _status.value = SkuScanStatus(
                 state = SkuScanState.Batch,
-                message = "Queued ${_batchQueue.value.size} barcodes",
+                message = "Queued $queueSize barcodes",
                 barcode = normalized,
                 format = detection.format
             )
@@ -219,6 +235,15 @@ class SkuScannerViewModel private constructor(
                 return SkuScannerViewModel(repository, analyzer, appScope) as T
             }
         }
+    }
+
+    private suspend fun addToBatchQueue(pending: SkuPendingRecord): Int? = batchMutex.withLock {
+        if (_batchQueue.value.any { it.barcode == pending.barcode }) {
+            return@withLock null
+        }
+        val updated = _batchQueue.value + pending
+        _batchQueue.value = updated
+        updated.size
     }
 }
 

@@ -1,5 +1,6 @@
 package com.sirim.scanner.ui.screens.scanner
 
+import android.graphics.Bitmap
 import androidx.camera.core.ImageProxy
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
@@ -21,8 +22,9 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
-import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 class ScannerViewModel private constructor(
     private val repository: SirimRepository,
@@ -49,6 +51,7 @@ class ScannerViewModel private constructor(
 
     private val _batchMode = MutableStateFlow(false)
     private val _batchQueue = MutableStateFlow<List<PendingRecord>>(emptyList())
+    private val batchMutex = Mutex()
 
     val batchUiState: StateFlow<BatchUiState> = combine(_batchMode, _batchQueue) { enabled, queue ->
         BatchUiState(
@@ -67,18 +70,34 @@ class ScannerViewModel private constructor(
     }
 
     fun clearBatchQueue() {
-        if (_batchQueue.value.isEmpty()) return
-        _batchQueue.value = emptyList()
-        _status.value = _status.value.copy(state = ScanState.Idle, message = "Batch queue cleared")
+        viewModelScope.launch {
+            val cleared = batchMutex.withLock {
+                if (_batchQueue.value.isEmpty()) {
+                    return@withLock false
+                }
+                _batchQueue.value = emptyList()
+                true
+            }
+            if (cleared) {
+                _status.value = _status.value.copy(state = ScanState.Idle, message = "Batch queue cleared")
+            }
+        }
     }
 
     fun saveBatch() {
-        val queued = _batchQueue.value
-        if (queued.isEmpty()) {
-            _status.value = _status.value.copy(message = "Batch queue is empty")
-            return
-        }
         appScope.launch {
+            val queued = batchMutex.withLock {
+                if (_batchQueue.value.isEmpty()) {
+                    return@withLock emptyList()
+                }
+                val snapshot = _batchQueue.value
+                _batchQueue.value = emptyList()
+                snapshot
+            }
+            if (queued.isEmpty()) {
+                _status.value = _status.value.copy(message = "Batch queue is empty")
+                return@launch
+            }
             val savedIds = mutableListOf<Long>()
             val skippedSerials = mutableListOf<String>()
             var totalConfidence = 0f
@@ -94,7 +113,6 @@ class ScannerViewModel private constructor(
                 savedIds += id
                 totalConfidence += pending.captureConfidence
             }
-            _batchQueue.value = emptyList()
             _batchMode.value = false
             if (savedIds.isNotEmpty()) {
                 _lastResultId.value = savedIds.last()
@@ -164,50 +182,54 @@ class ScannerViewModel private constructor(
     }
 
     private suspend fun handleResult(result: OcrResult, autoPersist: Boolean) {
-        val fields = when (result) {
-            is OcrResult.Success -> result.fields
-            is OcrResult.Partial -> result.fields
-            else -> emptyMap()
-        }
-        if (fields.isEmpty()) {
-            _status.value = ScanStatus(state = ScanState.Scanning, message = "Still searching for readable text")
-            return
-        }
-
-        val validation = FieldValidator.validate(fields)
-        _extractedFields.value = validation.sanitized
-        _validationWarnings.value = validation.warnings
-        _validationErrors.value = validation.errors
-
-        val baseStatus = when (result) {
-            is OcrResult.Success -> ScanState.Ready
-            is OcrResult.Partial -> ScanState.Partial
-            else -> ScanState.Scanning
-        }
-
-        val message = when {
-            validation.errors.isNotEmpty() -> "Review highlighted fields"
-            result is OcrResult.Partial -> "Hold steady for clearer capture"
-            else -> "Data captured"
-        }
-
-        _status.value = ScanStatus(
-            state = baseStatus,
-            message = message,
-            confidence = when (result) {
-                is OcrResult.Success -> result.confidence
-                is OcrResult.Partial -> result.confidence
-                else -> 0f
-            },
-            frames = when (result) {
-                is OcrResult.Success -> result.frames
-                is OcrResult.Partial -> result.frames
-                else -> 0
+        try {
+            val fields = when (result) {
+                is OcrResult.Success -> result.fields
+                is OcrResult.Partial -> result.fields
+                else -> emptyMap()
             }
-        )
+            if (fields.isEmpty()) {
+                _status.value = ScanStatus(state = ScanState.Scanning, message = "Still searching for readable text")
+                return
+            }
 
-        if (autoPersist && validation.errors.isEmpty()) {
-            persistIfUnique(validation, result as OcrResult.Success)
+            val validation = FieldValidator.validate(fields)
+            _extractedFields.value = validation.sanitized
+            _validationWarnings.value = validation.warnings
+            _validationErrors.value = validation.errors
+
+            val baseStatus = when (result) {
+                is OcrResult.Success -> ScanState.Ready
+                is OcrResult.Partial -> ScanState.Partial
+                else -> ScanState.Scanning
+            }
+
+            val message = when {
+                validation.errors.isNotEmpty() -> "Review highlighted fields"
+                result is OcrResult.Partial -> "Hold steady for clearer capture"
+                else -> "Data captured"
+            }
+
+            _status.value = ScanStatus(
+                state = baseStatus,
+                message = message,
+                confidence = when (result) {
+                    is OcrResult.Success -> result.confidence
+                    is OcrResult.Partial -> result.confidence
+                    else -> 0f
+                },
+                frames = when (result) {
+                    is OcrResult.Success -> result.frames
+                    is OcrResult.Partial -> result.frames
+                    else -> 0
+                }
+            )
+
+            if (autoPersist && validation.errors.isEmpty()) {
+                persistIfUnique(validation, result as OcrResult.Success)
+            }
+        } finally {
+            recycleResultBitmap(result)
         }
     }
 
@@ -238,11 +260,6 @@ class ScannerViewModel private constructor(
             timestamp = System.currentTimeMillis(),
             captureConfidence = result.confidence
         )
-        result.bitmap?.let { bitmap ->
-            if (!bitmap.isRecycled) {
-                bitmap.recycle()
-            }
-        }
         appScope.launch {
             val duplicate = repository.findBySerial(pending.serial)
             if (duplicate != null) {
@@ -250,8 +267,8 @@ class ScannerViewModel private constructor(
                 return@launch
             }
             if (_batchMode.value) {
-                val alreadyQueued = _batchQueue.value.any { it.serial.equals(pending.serial, ignoreCase = true) }
-                if (alreadyQueued) {
+                val queueSize = addToBatchQueue(pending)
+                if (queueSize == null) {
                     _status.value = _status.value.copy(
                         state = ScanState.Duplicate,
                         message = "${pending.serial} already queued",
@@ -259,8 +276,6 @@ class ScannerViewModel private constructor(
                     )
                     return@launch
                 }
-                _batchQueue.update { it + pending }
-                val queueSize = _batchQueue.value.size
                 _status.value = _status.value.copy(
                     state = ScanState.Ready,
                     message = "Queued ${pending.serial} ($queueSize pending)",
@@ -294,6 +309,29 @@ class ScannerViewModel private constructor(
                 return ScannerViewModel(repository, analyzer, appScope) as T
             }
         }
+    }
+
+    private suspend fun addToBatchQueue(pending: PendingRecord): Int? = batchMutex.withLock {
+        if (_batchQueue.value.any { it.serial.equals(pending.serial, ignoreCase = true) }) {
+            return@withLock null
+        }
+        val updated = _batchQueue.value + pending
+        _batchQueue.value = updated
+        updated.size
+    }
+
+    private fun recycleResultBitmap(result: OcrResult) {
+        when (result) {
+            is OcrResult.Success -> result.bitmap?.recycleSafely()
+            is OcrResult.Partial -> result.bitmap?.recycleSafely()
+            else -> Unit
+        }
+    }
+}
+
+private fun Bitmap?.recycleSafely() {
+    if (this != null && !isRecycled) {
+        recycle()
     }
 }
 data class ScanStatus(

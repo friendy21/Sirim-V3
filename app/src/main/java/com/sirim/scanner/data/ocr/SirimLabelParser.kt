@@ -172,23 +172,28 @@ object SirimLabelParser {
     private fun collapseVerticalText(text: String): String {
         val cleaned = text.replace("\uFF1A", ":")
         val lines = cleaned.lines()
-        val verticalSegments = mutableListOf<String>()
-        var buffer = StringBuilder()
-        lines.forEach { line ->
-            val trimmed = line.trim()
-            if (trimmed.length == 1 && trimmed.firstOrNull()?.isLetterOrDigit() == true) {
-                buffer.append(trimmed)
-            } else {
-                if (buffer.length >= 4) {
-                    verticalSegments += buffer.toString()
+        val verticalSegments = buildString {
+            var buffer = StringBuilder()
+            lines.forEach { line ->
+                val trimmed = line.trim()
+                if (trimmed.length == 1 && trimmed.firstOrNull()?.isLetterOrDigit() == true) {
+                    buffer.append(trimmed)
+                } else {
+                    if (buffer.length >= 4) {
+                        append(buffer)
+                        append(' ')
+                    }
+                    buffer = StringBuilder()
                 }
-                buffer = StringBuilder()
             }
-        }
-        if (buffer.length >= 4) {
-            verticalSegments += buffer.toString()
-        }
-        val augmented = cleaned + " " + verticalSegments.joinToString(" ")
-        return augmented.replace("\n", " ").replace("\\s+".toRegex(), " ").trim()
+            if (buffer.length >= 4) {
+                append(buffer)
+            }
+        }.trim()
+
+        return "$cleaned $verticalSegments"
+            .replace("\n", " ")
+            .replace(Regex("\\s+"), " ")
+            .trim()
     }
 }
