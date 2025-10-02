@@ -4,17 +4,17 @@ import android.graphics.Bitmap
 import android.graphics.Rect
 import android.os.SystemClock
 import androidx.camera.core.ImageProxy
-import com.google.mlkit.vision.barcode.common.Barcode
 import com.google.mlkit.vision.barcode.BarcodeScannerOptions
 import com.google.mlkit.vision.barcode.BarcodeScanning
+import com.google.mlkit.vision.barcode.common.Barcode
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 import com.google.zxing.BinaryBitmap
 import com.google.zxing.MultiFormatReader
+import com.google.zxing.RGBLuminanceSource
 import com.google.zxing.Result
 import com.google.zxing.common.HybridBinarizer
-import com.google.zxing.RGBLuminanceSource
 import java.nio.ByteBuffer
 import java.util.ArrayDeque
 import kotlin.io.use
@@ -22,6 +22,21 @@ import kotlin.math.max
 import kotlin.math.min
 import kotlinx.coroutines.tasks.await
 
+/**
+ * Analyzes camera frames to extract SIRIM label information using OCR and barcode detection.
+ *
+ * The analyzer performs the following steps:
+ * 1. Pre-process the incoming [ImageProxy] to enhance contrast and isolate the region of interest.
+ * 2. Run ML Kit text recognition followed by optional rotated retries to capture skewed text.
+ * 3. Fall back to Tesseract when ML Kit returns no text, tracking whether the language model exists.
+ * 4. Merge OCR output with QR payloads (via ML Kit and ZXing) and aggregate results across frames
+ *    to reach a stable consensus before reporting success.
+ *
+ * @property tesseractManager Manages lifecycle of the bundled Tesseract engine.
+ * @property frameWindow Number of frame observations required for consensus.
+ * @property successThreshold Minimum average confidence before reporting success.
+ * @property frameIntervalMillis Minimum delay between successive frame analyses to throttle work.
+ */
 class LabelAnalyzer(
     private val tesseractManager: TesseractManager,
     private val frameWindow: Int = 5,
@@ -43,6 +58,12 @@ class LabelAnalyzer(
     private val recentFrames = ArrayDeque<FrameObservation>()
     private var lastAnalysisTimestamp = 0L
 
+    /**
+     * Analyzes a single [ImageProxy] frame and returns OCR/QR extraction results.
+     *
+     * @param imageProxy Frame provided by CameraX.
+     * @return [OcrResult] describing the extracted fields, confidence, and status.
+     */
     suspend fun analyze(imageProxy: ImageProxy): OcrResult {
         if (!shouldProcessFrame()) {
             return OcrResult.Skipped
@@ -60,31 +81,9 @@ class LabelAnalyzer(
             missingModelDetected = missingModelDetected || primaryRecognition.missingModel
 
             if (textSegments.isEmpty()) {
-                for (angle in ROTATION_ANGLES) {
-
-                    var rotated: Bitmap? = null
-                    try {
-                        rotated = processed.enhanced.rotate(angle)
-                        if (rotated != null) {
-                            val rotatedResult = recognizeText(rotated)
-                            rotatedResult.text?.let(textSegments::add)
-                            missingModelDetected = missingModelDetected || rotatedResult.missingModel
-                            if (textSegments.isNotEmpty()) {
-                                break
-                            }
-                        }
-                    } finally {
-                        if (rotated != null && rotated !== processed.enhanced && !rotated.isRecycled) {
-                            rotated.recycle()
-                        }
-                    }
-                }
-
-            val combinedText = textSegments.joinToString("\n") { it.trim() }
-            val parsedFields = if (combinedText.isNotBlank()) {
-                SirimLabelParser.parse(combinedText).toMutableMap()
-            } else {
-                mutableMapOf()
+                val rotatedResult = tryRotatedRecognition(processed.enhanced, ROTATION_ANGLES)
+                rotatedResult.first?.let(textSegments::add)
+                missingModelDetected = missingModelDetected || rotatedResult.second
             }
 
             val combinedText = textSegments.joinToString("\n") { it.trim() }
@@ -226,6 +225,28 @@ class LabelAnalyzer(
         val sanitized = fallback?.takeIf { it.isNotBlank() }
         val missingModel = !tesseractManager.isModelAvailable()
         return RecognitionResult(text = sanitized, missingModel = missingModel)
+    }
+
+    private suspend fun tryRotatedRecognition(
+        bitmap: Bitmap,
+        angles: FloatArray
+    ): Pair<String?, Boolean> {
+        var missingModel = false
+        angles.forEach { angle ->
+            val rotated = bitmap.rotate(angle) ?: return@forEach
+            try {
+                val result = recognizeText(rotated)
+                missingModel = missingModel || result.missingModel
+                if (!result.text.isNullOrBlank()) {
+                    return result.text to missingModel
+                }
+            } finally {
+                if (rotated !== bitmap && !rotated.isRecycled) {
+                    rotated.recycle()
+                }
+            }
+        }
+        return null to missingModel
     }
 
     private fun shouldProcessFrame(): Boolean {

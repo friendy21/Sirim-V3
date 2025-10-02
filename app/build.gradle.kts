@@ -36,10 +36,31 @@ android {
     }
     kotlinOptions { jvmTarget = "17" }
 
-    buildFeatures { compose = true }
+    buildFeatures {
+        compose = true
+        buildConfig = true
+    }
+
+    splits {
+        abi {
+            isEnable = true
+            reset()
+            include("armeabi-v7a", "arm64-v8a", "x86", "x86_64")
+            isUniversalApk = true
+        }
+    }
 
     packaging {
-        resources { excludes += "/META-INF/{AL2.0,LGPL2.1}" }
+        resources {
+            excludes += setOf(
+                "/META-INF/{AL2.0,LGPL2.1}",
+                "META-INF/DEPENDENCIES",
+                "META-INF/LICENSE",
+                "META-INF/LICENSE.txt",
+                "META-INF/NOTICE",
+                "META-INF/NOTICE.txt"
+            )
+        }
     }
 }
 
@@ -74,7 +95,9 @@ dependencies {
     implementation("com.google.zxing:core:3.5.3")
 
     // JitPack artifact 4.9.0 bundles Tesseract 5.5.x and replaces the deprecated tess-two fork
-    implementation("com.github.adaptech-cz:tesseract4android:4.9.0")
+    implementation("com.github.adaptech-cz:tesseract4android:4.9.0") {
+        exclude(group = "com.github.adaptech-cz", module = "tesseract4android-openmp")
+    }
 
     implementation("androidx.room:room-runtime:2.7.0")
     kapt("androidx.room:room-compiler:2.7.0")
@@ -85,6 +108,7 @@ dependencies {
     implementation("org.opencv:opencv:4.10.0")
     implementation("com.itextpdf:itext7-core:8.0.7")
     implementation("org.apache.poi:poi-ooxml:5.3.0")
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
 
     testImplementation("junit:junit:4.13.2")
     androidTestImplementation("androidx.test.ext:junit:1.2.1")

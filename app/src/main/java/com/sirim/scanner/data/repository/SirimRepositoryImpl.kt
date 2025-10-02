@@ -1,6 +1,7 @@
 package com.sirim.scanner.data.repository
 
 import android.content.Context
+import android.database.sqlite.SQLiteConstraintException
 import com.sirim.scanner.data.db.SirimRecord
 import com.sirim.scanner.data.db.SirimRecordDao
 import com.sirim.scanner.data.db.SkuRecord
@@ -13,6 +14,8 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 class SirimRepositoryImpl(
     private val sirimDao: SirimRecordDao,
@@ -39,7 +42,15 @@ class SirimRepositoryImpl(
             (sirim.asStorageRecords() + sku.asStorageRecords()).sortedByDescending(StorageRecord::createdAt)
         }
 
-    override suspend fun upsert(record: SirimRecord): Long = sirimDao.upsert(record)
+    override suspend fun upsert(record: SirimRecord): Long = withContext(Dispatchers.IO) {
+        try {
+            sirimDao.upsert(record)
+        } catch (error: SQLiteConstraintException) {
+            throw DuplicateRecordException("Serial ${record.sirimSerialNo} already exists")
+        } catch (error: Exception) {
+            throw DatabaseException("Failed to save record", error)
+        }
+    }
 
     override suspend fun upsertSku(record: SkuRecord): Long = skuDao.upsert(record)
 
