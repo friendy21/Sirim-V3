@@ -7,8 +7,8 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
     entities = [SirimRecord::class, SkuRecord::class],
-    version = 2,
-    exportSchema = false
+    version = 3,
+    exportSchema = true
 )
 abstract class SirimDatabase : RoomDatabase() {
     abstract fun sirimRecordDao(): SirimRecordDao
@@ -45,6 +45,15 @@ abstract class SirimDatabase : RoomDatabase() {
                     database.execSQL("ROLLBACK")
                     throw error
                 }
+            }
+        }
+
+        val MIGRATION_2_3: Migration = object : Migration(2, 3) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL(
+                    "CREATE INDEX IF NOT EXISTS index_sirim_records_brand_verified " +
+                        "ON sirim_records(brand_trademark, is_verified)"
+                )
             }
         }
     }
