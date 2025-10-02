@@ -95,7 +95,9 @@ dependencies {
     implementation("com.google.zxing:core:3.5.3")
 
     // JitPack artifact 4.9.0 bundles Tesseract 5.5.x and replaces the deprecated tess-two fork
-    implementation("com.github.adaptech-cz:tesseract4android:4.9.0")
+    implementation("com.github.adaptech-cz:tesseract4android:4.9.0") {
+        exclude(group = "com.github.adaptech-cz", module = "tesseract4android-openmp")
+    }
 
     implementation("androidx.room:room-runtime:2.7.0")
     kapt("androidx.room:room-compiler:2.7.0")
